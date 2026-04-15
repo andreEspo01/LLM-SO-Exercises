@@ -1,0 +1,15 @@
+modelli in fallback, chunking -> da evitare negli esperimenti finali. Si può limitare l'uso dei modelli più potenti solo per LLM giudice (gestisce prompt piccoli)
+ 
+ 
+Esempio AMprota: gli script hanno applicato regole statiche anche su sorgenti per cui non sono destinate (es. regole per il server, applicate sul sorgente del client) --> DA VERIFICARE
+ 
+ 
+Per gli esercizi "corretti", occorre anche in questo caso usare il giudice (si chiede al giudice se i programmi corretti sono effettivamente stati diagnosticati come corretti)
+ 
+ 
+per diagnosi LLM primario: 
+- dare un limite di numero di parole (es. max 100 parole)
+- chiedere di indicare linee di codice, nomi di funzioni, etc.
+ 
+ 
+la qualità della diagnosi del giudice sembra buona, è utile verificare a mano più esempi (2-3 esempi per ogni esercizio, sia per casi statici sia dinamici)

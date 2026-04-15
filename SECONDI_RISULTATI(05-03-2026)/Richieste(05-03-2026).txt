@@ -1,0 +1,61 @@
+grafico iniziale:
+- tabella o grafico a barre, contando i casi:
+---- errori di compilazione
+---- crash/timeout
+---- resource leak
+---- fallimento segnalato dai dynamic check
+---- fallimento segnalato dagli static check
+ 
+ 
+per i soli casi di esercizi che falliscono dynamic check:
+- LLM primario riceve testo traccia, output --> valuta se output è "corretto", fornisce anche una "diagnosi" sull'output
+- LLM primario riceve testo+output+codice --> dare una "diagnosi" sul sorgente
+- LLM giudice riceve la "diagnosi output" dal primario, la confronta con il messaggio di errore dello script dinamico (print PERL)
+- LLM giudice riceve la "diagnosi codice", i warning della analisi statica (se presenti) + codice studente attorno alla diagnosi, + codice soluzione alla stessa posizione (la funzione che contiene il codice oppure un intorno di +10/-10 linee)
+ 
+ 
+primo grafico:
+--- % LLM primario dice che output è corretto (non trova l'errore)
+--- % LLM primario dice che è scorretto, ma diagnosi output non è corretta
+--- % LLM primario dice che è scorretto, è anche la diagnosi output è corretta
+ 
+secondo grafico:
+--- % LLM primario dice di non aver trovato l'errore nel codice (?)
+--- % LLM primario dice che è scorretto, ma diagnosi codice non è corretta
+--- % LLM primario dice che è scorretto, è anche la diagnosi codice è corretta
+ 
+ 
+ 
+per i soli casi di esercizi che falliscono static check (implica che i check dinamici sono superati):
+- LLM primario riceve testo traccia, output --> valuta se output è "corretto", fornisce anche una "diagnosi" sull'output (***SE TROVA ERRORI, SONO FALSI ALLARMI***) (*** STESSA QUERY DEL CASO DI PRIMA ***)
+- LLM primario riceve testo+output+codice --> dare una "diagnosi" sul sorgente (*** STESSA QUERY DEL CASO DI PRIMA ***)
+- LLM giudice non serve per la "diagnosi output"
+- LLM giudice riceve la "diagnosi codice", la confronta con warning della analisi statica (sicuramente presenti)
+ 
+ 
+primo grafico:
+--- % LLM primario dice che output è corretto (è ok, si trova con ground truth)
+--- % LLM primario dice che è scorretto (diagnosi è scorretta a prescindere)
+ 
+secondo grafico:
+--- % LLM primario dice di non aver trovato l'errore nel codice (?)
+--- % LLM primario dice che è scorretto, ma diagnosi codice non è corretta
+--- % LLM primario dice che è scorretto, è anche la diagnosi codice è corretta
+ 
+ 
+ 
+prompt per LLM primario:
+- dirgli che i programmi potrebbero essere corretti, non sbilanciarti se non sei sicuro
+- per ora diamo solo porzioni di soluzione (per limiti di contesto)
+- nella analisi "finale", potremo dare tutto il codice, più i nomi delle funzioni con le modifiche
+ 
+ 
+prompt per giudice:
+- tenere conto che programma è concorrente, le stampe potrebbero cambiare ordine ma essere ancora corrette
+ 
+ 
+- se esercizio ha fallimento dinamico, viene comunque chiesta una "diagnosi" all'LLM primario. LLM primario riceve codice studente e diagnosi+output errato, e produce diagnosi del codice. Per valutare la qualità della diagnosi del codice, lo LLM giudice la confronta con codice studente+codice soluzione+warning analisi statica (se ce ne sono stati)
+ 
+
+dimenticavo: pls dai uno sguardo "a campione" su qualcuno degli esercizi, salvandoti in una cartella i log dell'esecuzione e della analisi statica
+ 
