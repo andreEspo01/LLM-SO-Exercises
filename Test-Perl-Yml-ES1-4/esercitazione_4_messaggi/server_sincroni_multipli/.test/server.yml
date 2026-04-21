@@ -1,0 +1,39 @@
+rules:
+  - id: ftok_server
+    languages: [c]
+    severity: ERROR
+    message: "Il processo client deve utilizzare le stesse chiavi del processo server. Poichè questo esercizio utilizza eseguibili differenti per il client e per il server, è necessario utilizzare ftok()."
+    pattern-either:
+      - pattern: key_t ok_key = IPC_PRIVATE;
+      - pattern: key_t req_key = IPC_PRIVATE;
+      - pattern: int ok_id = msgget(IPC_PRIVATE,...);
+      - pattern: int req_id = msgget(IPC_PRIVATE,...);
+
+  - id: ftok_server_distinct_key
+    languages: [c]
+    severity: ERROR
+    message: "Le chiavi ok_key e req_key devono essere differenti. È quindi necessario usare parametri differenti nelle chiamate a ftok()."
+    patterns:
+      - pattern: |
+          key_t ok_key = ftok(... , $N1); 
+          ...
+          key_t req_key = ftok(... , $N2);
+      - metavariable-pattern:
+          metavariable: $N1
+          patterns:
+            - pattern: $N2
+
+  - id: private_message_queue_server
+    languages: [c]
+    severity: ERROR
+    message: "È richiesto che ogni server usi una coda msg_id distinta dagli altri server. Usare ftok() non è corretto, perchè se ftok() viene chiamata più volte con gli stessi parametri, si ottiene sempre la stessa chiave e quindi la stessa coda. È sufficiente usare qui IPC_PRIVATE."
+    pattern-either:
+      - pattern: |
+          key_t msg_key = ftok(...);
+          ...
+          int msg_id = msgget(msg_key,...);
+      - pattern:
+          int msg_id = msgget(ftok(...),...);
+
+
+      

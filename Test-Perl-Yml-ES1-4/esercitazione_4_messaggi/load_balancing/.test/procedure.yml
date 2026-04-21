@@ -1,0 +1,22 @@
+rules:
+  - id: msgsnd_last_parameter
+    languages: [c]
+    severity: ERROR 
+    message: "L'ultimo parametro di msgsnd() deve essere 0. Nota che non è richiesto IPC_NOWAIT per effettuare la send asincrona."
+    patterns:
+      - pattern: msgsnd( ... , $LAST)
+      - metavariable-pattern:
+          metavariable: $LAST
+          patterns:
+            - pattern-not: "0"
+
+  - id: msgrcv_forth_constant_or_pid
+    languages: [c]
+    severity: ERROR
+    message: "In questo esercizio, NON va effettuata una receive selettiva. Il quarto parametro della funzione msgrcv() deve essere 0."
+    patterns:
+      - pattern: msgrcv(..., $FORTH, $VAR)
+      - metavariable-pattern:
+          metavariable: $FORTH
+          patterns: 
+            - pattern-not: "0"

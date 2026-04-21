@@ -1,0 +1,91 @@
+rules:
+  - id: send_msg_query_type
+    languages: [c]
+    severity: ERROR
+    message: 'Il messaggio inviato dal client deve essere inizializzato, assegnando al campo tipo un valore diverso strettamente maggiore di zero.'
+    patterns:
+      - pattern: |
+          void client(...){
+            ...
+            $RES = msgsnd(id_coda_registro_richieste, ...);
+            ...
+          }
+      - pattern-not:
+          patterns:
+            - pattern: |
+                void client(...){
+                  ...
+                  $MSG.$TYPE = $VALUE;
+                  ...
+                  $RES = msgsnd(id_coda_registro_richieste, &$MSG, ...);
+                  ...
+                }
+            - metavariable-comparison:
+                metavariable: $VALUE
+                comparison: $VALUE > 0
+
+  - id: send_msg_query_id
+    languages: [c]
+    severity: ERROR
+    message: 'Il messaggio inviato dal client al registro deve contenere il valore "id_server".'
+    patterns:
+      - pattern: |
+          void client(...){
+            ...
+            $RES = msgsnd(id_coda_registro_richieste, ...);
+            ...
+          }
+      - pattern-not: |
+          void client(...){
+            ...
+            $MSG.$ID = id_server;
+            ...
+            $RES = msgsnd(id_coda_registro_richieste, &$MSG, ...);
+            ...
+          }
+
+  - id: receive_msg_queue_id
+    languages: [c]
+    severity: ERROR
+    message: 'Nel client, lo ID della coda server in "id_coda_server" deve essere ricavato dal messaggio RESULT ricevuto dal registro.'
+    patterns:
+      - pattern: |
+          void client(...){
+            ...
+            $RES = msgrcv(id_coda_registro_risposte, ...);
+            ...
+          }
+      - pattern-not: |
+          void client(...){
+            ...
+            $RES = msgrcv(id_coda_registro_risposte, &$MSG, ...);
+            ...
+            id_coda_server = $MSG.$ID;
+            ...
+          }
+      - pattern-not: |
+          void client(...){
+            ...
+            $RES = msgrcv(id_coda_registro_risposte, &$MSG, ...);
+            ...
+            int id_coda_server = $MSG.$ID;
+            ...
+          }
+
+  - id: receive_selective_server_id
+    languages: [c]
+    severity: ERROR
+    message: 'Il client deve effettuare una receive selettiva del messaggio dal registro. È necessario indicare "id_server" (lo identificativo del server) come quarto parametro di msgrcv() per la receive selettiva.'
+    patterns:
+      - pattern: |
+          void client(...){
+            ...
+            $RES = msgrcv(id_coda_registro_risposte, &$MSG, ...);
+            ...
+          }
+      - pattern-not: |
+          void client(...){
+            ...
+            $RES = msgrcv(id_coda_registro_risposte, ... , id_server, 0);
+            ...
+          }

@@ -1,0 +1,139 @@
+rules:
+  - id: missing-mutex-push-pop
+    pattern-either:
+      - patterns:
+          - pattern: |
+              void StackPush(...) {
+                  ...
+              }
+          - pattern-not: |
+              void StackPush(...) {
+                  pthread_mutex_lock(...);
+                  ...
+                  pthread_mutex_unlock(...);
+              }
+      - patterns:
+          - pattern: |
+              $ELEM StackPop(...) {
+                  ...
+              }
+          - pattern-not: |
+              $ELEM StackPop(...) {
+                  int elemento;
+                  pthread_mutex_lock(...);
+                  ...
+                  pthread_mutex_unlock(...);
+                  return elemento;
+              }
+    message: I metodi del monitor devono essere sempre eseguiti in mutua esclusione,
+             acquisendo un mutex all'ingresso del metodo, e rilasciandolo all'uscita dal metodo.
+    languages:
+      - c
+    severity: ERROR
+
+  - id: missing-mutex-size
+    patterns:
+      - pattern: |
+          int StackSize(...) {
+            ...
+          }
+      - pattern-not: |
+          int StackSize(...) {
+            int size;
+            pthread_mutex_lock(...);
+            ...
+            pthread_mutex_unlock(...);
+            return size;
+          }
+    message: Anche il metodo StackSize(), pur accedendo in sola lettura al monitor, deve essere eseguito in mutua esclusione,
+             acquisendo un mutex all'ingresso del metodo, e rilasciandolo all'uscita dal metodo. Questo occorre per evitare
+             una race condition tra StackSize() e la contemporanea modifica dello stack da parte di un altro thread.
+             Nei metodo StackPush() e StackPop(), si consiglia di non chiamare il metodo StackSize(), ma di accedere direttamente
+             alle variabili membro interne della struttura dati.
+    languages:
+      - c
+    severity: ERROR
+
+
+  - id: missing-signal-consumers
+    patterns:
+      - pattern: |
+          void StackPush(...){
+            ...
+          }
+      - pattern-not: |
+          void StackPush(...){
+            ...
+            pthread_cond_signal(...);
+            ...
+          }
+
+    message: Prima di terminare l'operazione di produzione (push) è sempre necessario
+      notificare i consumatori che possono procedere (pop)
+    languages:
+      - c
+    severity: ERROR
+
+  - id: missing-signal-producers
+    patterns:
+      - pattern: |
+          void StackPop(...){
+            ...
+          }
+      - pattern-not: |
+          void StackPop(...){
+            ...
+            pthread_cond_signal(...);
+            ...
+          }
+
+    message: Prima di terminare l'operazione di consumazione (pop), è sempre necessario
+      notificare i produttori che possono procedere (push)
+    languages:
+      - c
+    severity: ERROR
+
+
+  - id: using-if
+    pattern-either:
+      - pattern: |
+          void StackPush(...){
+            ...
+            if(...){
+              ...
+              pthread_cond_wait(...);
+              ...
+            }
+            ...
+          }
+      - pattern: |
+          $ELEM StackPop(...){
+              ...
+              if(...){
+                ...
+                pthread_cond_wait(...);
+                ...
+              }
+              ...
+            }
+      - pattern: |
+          void StackPush(...){
+            ...
+            if(...)
+              pthread_cond_wait(...);
+            ...
+          }
+      - pattern: |
+          $ELEM StackPop(...){
+              ...
+              if(...)
+                pthread_cond_wait(...);
+              ...
+            }
+
+    message: La condizione va controllata all'interno di un ciclo "while".
+             Nei programmi basati su libreria PThreads, il monitor è sempre di tipo signal-and-continue.
+    languages:
+      - c
+    severity: ERROR
+

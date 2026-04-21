@@ -1,0 +1,63 @@
+rules:
+  - id: key-distinct-queues
+    languages: [c]
+    severity: ERROR
+    message: "In questo esercizio, è necessario che i server usino code distinte. Se i processi chiamano tutti ftok() con gli stessi parametri, ottengono la stessa chiave e quindi la stessa coda. Il modo suggerito di risolvere l'esercizio è utilizzare IPC_PRIVATE (le code non avranno una chiave, e msgget restituirà uno ID distinto)."
+    pattern-either:
+      - patterns:
+         - pattern:
+            $KEY = ...;
+            ...
+            for(i=0; i<$TOTALE; i++){
+              ...
+              msgget($KEY,...);
+              ...
+            }
+         - pattern-not: |
+            $KEY = IPC_PRIVATE;
+            ...
+            for(i=0; i<$TOTALE; i++){
+              ...
+              msgget($KEY, ...);
+              ...
+            }
+
+      - patterns:
+        - pattern: |
+            for(i=0; i<$TOTALE; i++){
+              ...
+              $KEY = ...;
+              ...
+              msgget($KEY, ...);
+              ...
+            }
+        - pattern-not: |
+            for($IDX=0; $IDX<$TOTALE; $IDX++){
+              ...
+              $KEY = ftok(...,<... $IDX ...>);
+              ...
+              msgget($KEY, ...);
+              ...
+            }
+        - pattern-not: |
+            for(i=0; i<$TOTALE; i++){
+              ...
+              $KEY = IPC_PRIVATE;
+              ...
+              msgget($KEY, ...);
+              ...
+            }
+
+      - patterns:
+        - pattern: |
+            for(i=0; i<$TOTALE; i++){
+              ...
+              msgget(ftok(...), ...);
+              ...
+            }
+        - pattern-not: |
+            for($IDX=0; $IDX<$TOTALE; $IDX++){
+              ...
+              msgget(ftok($PATH,<... $IDX ...>), ...);
+              ...
+            }

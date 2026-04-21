@@ -1,0 +1,24 @@
+rules:
+  - id: errore-while-signal-and-wait
+    languages:
+      - c
+    severity: ERROR
+    message: "È un monitor signal and wait, non è necessario il ciclo while."
+    patterns:
+      - pattern: |
+          enter_monitor(...);
+          ...
+          while($COND){
+            ...
+            wait_condition(...);
+            ...
+          }
+          ...
+          leave_monitor(...);
+      - pattern: |
+          enter_monitor(...);
+          ...
+          while($COND)
+            wait_condition(...);
+          ...
+          leave_monitor(...);

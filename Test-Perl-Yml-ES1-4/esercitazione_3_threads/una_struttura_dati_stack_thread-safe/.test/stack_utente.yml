@@ -1,0 +1,30 @@
+rules:
+  - id: bad-join
+    patterns:
+      - pattern: |
+          int main(...){
+            ...
+          }
+      - pattern-not-inside: |
+          ...
+          for($I=0; $I<$N; $I++){
+            ...
+            pthread_join(...);
+            ...
+          }
+      - pattern-not-inside: |
+          ...
+          for(int $I=0; $I<$N; $I++){
+            ...
+            pthread_join(...);
+            ...
+          }
+
+
+    message: Sono stati instanziati 6 threads in totale, controllare che la pthread_join() venga invocata più volte
+    languages:
+      - c
+    severity: WARNING
+
+
+

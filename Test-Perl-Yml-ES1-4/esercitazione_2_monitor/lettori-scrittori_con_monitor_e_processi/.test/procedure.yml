@@ -1,0 +1,132 @@
+rules:
+  - id: errore-wait-signal
+    languages:
+      - c
+    severity: ERROR
+    message: "Assicurarsi di aver valutato sia il caso di ulteriori scrittori sia di ulteriori lettori in attesa."
+    patterns:
+      - pattern: |
+          void FineScrittura(...){
+            ...
+            if($QUEUE_CONDITION > 0)
+              ...
+            ...
+          }
+      - pattern-not: |
+          void FineScrittura(...){
+            ...
+            if($QUEUE_CONDITION_S > 0){
+              ...
+              signal_condition(...);
+              ...
+            }
+            else if($QUEUE_CONDITION_L > 0){
+              ...
+              signal_condition(...);
+              ...
+            }
+            ...
+          }
+      - pattern-not: |
+          void FineScrittura(...){
+            ...
+            if($QUEUE_CONDITION_S > 0)
+              signal_condition(...);
+            else if($QUEUE_CONDITION_L > 0)
+              signal_condition(...);
+            ...
+          }
+      - pattern-not: |
+          void FineScrittura(...){
+            ...
+            if($QUEUE_CONDITION_S > 0){
+              ...
+              signal_condition(...);
+              ...
+            }
+            else{
+              ...
+              signal_condition(...);
+              ...
+            }
+            ...
+          }
+      - pattern-not: |
+          void FineScrittura(...){
+            ...
+            if($QUEUE_CONDITION_S > 0)
+              signal_condition(...);
+            else
+              signal_condition(...);
+            ...
+          }
+
+
+  - id: controllo-ultimo-lettore
+    languages:
+      - c
+    severity: WARNING
+    message: "Solo l'ultimo lettore deve attivare uno scrittore. Aggiungere il controllo sulla variabile num_lettori == 0"
+    patterns:
+      - pattern: |
+          void FineLettura(...){
+            enter_monitor(...);
+            ...
+            signal_condition(...);
+            ...
+            leave_monitor(...);
+          }
+      - pattern-not: |
+          void FineLettura(...){
+            enter_monitor(...);
+            ...
+            if($NUM_LETTORI == 0)
+              signal_condition(...);
+            ...
+            leave_monitor(...);
+          }
+      - pattern-not: |
+          void FineLettura(...){
+            enter_monitor(...);
+            ...
+            if($NUM_LETTORI == 0){
+              ...
+              signal_condition(...);
+              ...
+            }
+            ...
+            leave_monitor(...);
+          }
+
+  - id: controllo-scrittori
+    languages:
+      - c
+    severity: WARNING
+    message: "E' utile controllare anche la presenza di scrittori. In questo caso c'è un solo scrittore, ma in generale potrebbero essercene più di uno. "
+    patterns:
+      - pattern: |
+          void InizioScrittura(...){
+            enter_monitor(...);
+            ...
+            if ($CONDITION){
+              ...
+              wait_condition(...);
+              ...
+            }
+            ...
+            leave_monitor(...);
+          }
+      - pattern: |
+          void InizioScrittura(...){
+            enter_monitor(...);
+            ...
+            if ($CONDITION)
+              wait_condition(...);
+            ...
+            leave_monitor(...);
+          }
+      - metavariable-pattern:
+          metavariable: $CONDITION
+          patterns:
+            - pattern-not: "$NUM_LETTORI > 0 || $NUM_SCRITTORI > 0"
+            - pattern-not: "$NUM_LETTORI != 0 || $NUM_SCRITTORI != 0"

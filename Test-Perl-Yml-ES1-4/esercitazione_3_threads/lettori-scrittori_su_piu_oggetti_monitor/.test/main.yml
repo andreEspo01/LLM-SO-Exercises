@@ -1,0 +1,17 @@
+rules:
+  - id: 13-missing-free
+    patterns:
+      - pattern: |
+          int main(...){
+            ...
+          }
+      - pattern-not-inside: |
+          ...
+          free(...);
+          ...
+          
+    message: In conclusione al programma è sempre buona norma rilasciare le aree di
+      memoria precedentemente utilizzate e riservate
+    languages:
+      - c
+    severity: WARNING
