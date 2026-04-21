@@ -58,11 +58,14 @@ else:
 
 COMPILE_TIMEOUT = 120
 TEST_TIMEOUT = 120
+BASH_ANALYSIS_TIMEOUT = 900
+BASH_ANALYSIS_SCRIPT = "/home/andre/Script-Bash-Only-Test.sh"
+COMMIT_SELECTION_WINDOW = 4
 
 LLM_CONNECT_TIMEOUT = 60
 LLM_READ_TIMEOUT = 2000
 
-OUTPUT_FILE = "risultati_es5_Azure.json"
+OUTPUT_FILE = "risultati_es5.json"
 LOG_SAMPLE_DIR = "experiment_logs"
 LLM_CACHE_FILE = "llm_cache.json"
 
@@ -372,7 +375,7 @@ def llm_safe_call(fn, prompt, model, system_prompt, max_completion_tokens=None, 
                     time.sleep(wait_time)
                     continue
 
-            # fallback → errore reale (non rientra in retry)
+            # fallback è errore reale (non rientra in retry)
             raise
 
     # Se esce dal loop normalmente, è un errore
@@ -782,7 +785,7 @@ def run_tests_compat(path):
         # Se non trova, ritorna il feedback originale per diagnosticare
         return feedback_text
 
-    # caso 1: un solo script → comportamento identico a prima, ma pulito
+    # caso 1: un solo script è comportamento identico a prima, ma pulito
     if len(all_results) == 1:
         r = all_results[0]
         feedback = remove_script_names(r["feedback"])
@@ -795,7 +798,7 @@ def run_tests_compat(path):
             feedback
         )
 
-    # caso 2: più script → aggrega e poi pulisci
+    # caso 2: più script è aggrega e poi pulisci
     all_ok = all(r["ok"] for r in all_results)
 
     all_stdout = "".join(r["script_out"] for r in all_results if r["script_out"])
@@ -816,13 +819,33 @@ def run_tests_compat(path):
 def clean_feedback_for_json(feedback_text):
     if not feedback_text:
         return ""
-    # rimuove emoji shortcode
+
     feedback_text = re.sub(r":[a-z_]+:", "", feedback_text)
-    # sostituisce \n multipli con uno solo
-    feedback_text = re.sub(r"\n+", "\n", feedback_text)
-    # rimuove spazi iniziali/finali
+    feedback_text = re.sub(r"<br/><pre>\s*</pre>", "", feedback_text, flags=re.S)
+    feedback_text = re.sub(r"<br/><pre>.*?</pre>", "", feedback_text, flags=re.S)
+    feedback_text = re.sub(r"<pre>\s*</pre>", "", feedback_text, flags=re.S)
+    feedback_text = re.sub(r"<[^>]+>", "", feedback_text)
+    feedback_text = feedback_text.replace("\r", "")
+    feedback_text = re.sub(r"\n{3,}", "\n\n", feedback_text)
+    feedback_text = feedback_text.strip()
     return feedback_text.strip()
 
+
+def normalize_static_warnings(raw_warnings):
+    if not raw_warnings:
+        return []
+
+    if isinstance(raw_warnings, list):
+        return raw_warnings
+
+    if isinstance(raw_warnings, str):
+        try:
+            parsed = json.loads(raw_warnings)
+            return parsed if isinstance(parsed, list) else []
+        except Exception:
+            return []
+
+    return []
 
 def extract_compile_errors(compile_log, max_items=4):
     if not compile_log:
@@ -908,7 +931,7 @@ def get_commits(repo_path):
 
 def checkout_commit(repo_path, commit_hash):
     subprocess.run(
-        ["git", "checkout", "-q", commit_hash, "--"],
+        ["git", "checkout", "-q", commit_hash, "--", "."],
         cwd=repo_path,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL
@@ -916,11 +939,112 @@ def checkout_commit(repo_path, commit_hash):
 
 def checkout_head(repo_path):
     subprocess.run(
-        ["git", "checkout", "-q", "HEAD", "--"],
+        ["git", "checkout", "-q", "HEAD", "--", "."],
         cwd=repo_path,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL
     )
+
+def get_student_commit_candidates(student_dir, exercise_names, window=COMMIT_SELECTION_WINDOW):
+    pathspecs = list(exercise_names) if exercise_names else ["."]
+    try:
+        res = subprocess.run(
+            ["git", "rev-list", "HEAD", "--", *pathspecs],
+            cwd=student_dir,
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        commits = [line.strip() for line in res.stdout.splitlines() if line.strip()]
+    except Exception:
+        commits = []
+
+    if not commits:
+        return ["HEAD"]
+
+    if len(commits) == 1:
+        return commits[:1]
+
+    previous_first = commits[1:1 + window]
+    return previous_first or commits[:1]
+
+def run_bash_student_commit_analysis(student_dir, commit_hash):
+    try:
+        res = subprocess.run(
+            [
+                "bash",
+                BASH_ANALYSIS_SCRIPT,
+                "--single-student-commit",
+                "--student-dir",
+                str(student_dir),
+                "--commit",
+                commit_hash,
+                "--quiet",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=BASH_ANALYSIS_TIMEOUT,
+            check=True,
+        )
+        stdout = res.stdout.strip()
+        if not stdout:
+            return []
+        return json.loads(stdout)
+    except Exception as e:
+        log(f"[BASH ANALYSIS ERROR] student={student_dir.name} commit={commit_hash}: {e}")
+        return []
+
+def score_student_commit_candidate(candidate_results, correct_count, incorrect_count, rank):
+    correct_hits = sum(1 for r in candidate_results if r.get("failure_category") == "correct")
+    static_hits = sum(1 for r in candidate_results if r.get("failure_category") == "static_failure")
+    incorrect_hits = len(candidate_results) - correct_hits
+
+    need_more_correct = correct_count < incorrect_count
+    preferred_hits = correct_hits if need_more_correct else incorrect_hits
+    imbalance_after = abs((correct_count + correct_hits) - (incorrect_count + incorrect_hits))
+
+    return (
+        static_hits,
+        -imbalance_after,
+        preferred_hits,
+        -rank,
+        len(candidate_results),
+    )
+
+def select_student_commit(student_dir, pending_exercises, correct_count, incorrect_count):
+    candidates = get_student_commit_candidates(student_dir, pending_exercises)
+    evaluated = []
+    required_exercises = set(pending_exercises)
+
+    for rank, commit_hash in enumerate(candidates):
+        candidate_results = run_bash_student_commit_analysis(student_dir, commit_hash)
+        candidate_results = [r for r in candidate_results if r.get("exercise") in pending_exercises]
+        covered_exercises = {r.get("exercise") for r in candidate_results}
+
+        log(
+            "       Candidato "
+            f"{commit_hash[:12]}: "
+            f"copertura={len(covered_exercises)}/{len(required_exercises)}, "
+            f"static={sum(1 for r in candidate_results if r.get('failure_category') == 'static_failure')}, "
+            f"correct={sum(1 for r in candidate_results if r.get('failure_category') == 'correct')}, "
+            f"non_correct={sum(1 for r in candidate_results if r.get('failure_category') != 'correct')}"
+        )
+
+        if covered_exercises != required_exercises:
+            continue
+
+        score = score_student_commit_candidate(candidate_results, correct_count, incorrect_count, rank)
+        evaluated.append((score, rank, commit_hash, candidate_results))
+
+    if evaluated:
+        evaluated.sort(reverse=True)
+        _, _, selected_commit, selected_results = evaluated[0]
+        return selected_commit, selected_results
+
+    fallback_commit = "HEAD"
+    fallback_results = run_bash_student_commit_analysis(student_dir, fallback_commit)
+    fallback_results = [r for r in fallback_results if r.get("exercise") in pending_exercises]
+    return fallback_commit, fallback_results
 
 # ================= LETTURA FILE =================
 
@@ -1312,7 +1436,7 @@ Decision rules:
 - Do not reinterpret a client-visible field named `risultato` as a mere acknowledgment unless the trace explicitly labels it as ack/ok/status and not as an operation result.
 - In request/reply style traces, each client-visible reply must be judged as the result of the immediately preceding request for the same actor, not as a generic protocol acknowledgment.
 - When a request visibly carries operands, parameters, message ids, or payload values, check the corresponding visible reply or forwarded value against those exact visible inputs whenever the operation semantics make that check possible.
-- If the trace gives enough information to validate values one by one, do that validation. A YES answer should mean that the visible exchanged values are individually consistent, not just globally plausible.
+- + If the trace gives enough information to validate values one by one, you MUST explicitly recompute those values step by step before claiming a mismatch. Do not rely on intuition or approximate reasoning for arithmetic checks. A YES answer should mean that the visible exchanged values are individually consistent, not just globally plausible.
 - If a later consume/receive/dequeue/read returns a meaningful value before the corresponding produce/send/enqueue/write phase is visibly established, do not use that later value as evidence that the earlier phase was correct.
 - If a semantic operation such as SUM/PRODUCT receives a visible reply that conflicts with a later visible produced or consumed value in the same trace family, treat that as a concrete mismatch.
 - If a request receives an immediate visible reply with a placeholder or semantically wrong value, and the meaningful result later appears as the outcome of a different operation such as consume/dequeue/read, treat that as a wrong request/reply association and mark NO.
@@ -1526,7 +1650,7 @@ Decision rules:
 - Do not report a missing pattern unless the relevant function or code block is actually shown.
 - Ignore hypothetical runtime causes that are not directly visible in the code.
 - Distinguish the violation class precisely: for example, wrong synchronization policy, wrong lifetime, wrong placement, wrong cleanup, wrong selector, or forbidden primitive.
-- Do not collapse a specialized policy defect into a generic “missing mutex” diagnosis.
+- Do not collapse a specialized policy defect into a generic 'missing mutex' diagnosis.
 - If mutexes, semaphores, condition variables, monitor procedures, or dedicated read/write functions are already visible, do not diagnose "missing synchronization primitives" unless the shown declarations and operations truly contain no synchronization mechanism for the relevant path.
 - In reader-writer style code, if reader and writer procedures are already present, prefer diagnosing the wrong reader-writer policy or over-serialization of readers rather than claiming there is no synchronization at all.
 - Do not diagnose a queue-ID or selector mix-up merely because one variable stores or aliases another queue identifier; diagnose it only if the visible send/receive or type-selection sites are concretely inconsistent.
@@ -1847,7 +1971,7 @@ def classify_failure_category(feedback_text):
 
 # ================= PARSING =================
 
-YES_SET = {"YES", "Y", "Yes", "yes", "TRUE", "T", "t", "SI", "SÌ", "SI'", "si'"}
+YES_SET = {"YES", "Y", "Yes", "yes", "TRUE", "T", "t", "SI", "Sì", "SI'", "si'"}
 NO_SET = {"NO", "N", "n", "No", "no", "FALSE", "F"}
 
 def normalize_bool(value):
@@ -2310,120 +2434,62 @@ def main():
         ])
 
         total_ex = len(exercise_dirs)
+        delivered_exercises = [exercise_dir.name for exercise_dir in exercise_dirs]
+
+        pending_exercises = [
+            exercise_dir.name
+            for exercise_dir in exercise_dirs
+            if (student_name, exercise_dir.name) not in already_done
+        ]
+
+        if not pending_exercises:
+            log("    Tutti gli esercizi sono gia' analizzati")
+            continue
+
+        log(f"    Selezione commit unico per studente...")
+        selected_commit, selected_analysis = select_student_commit(
+            student_dir,
+            delivered_exercises,
+            correct_count,
+            incorrect_count
+        )
+        analysis_by_exercise = {
+            item["exercise"]: item
+            for item in selected_analysis
+        }
+
+        if selected_commit == "HEAD":
+            checkout_head(student_dir)
+        else:
+            checkout_commit(student_dir, selected_commit)
+
+        log(f"    Commit selezionato: {selected_commit}")
 
         for j, exercise_dir in enumerate(exercise_dirs, start=1):
 
             if (student_name, exercise_dir.name) in already_done:
-                log(f"    ({j}/{total_ex}) {exercise_dir.name} - GIÀ ANALIZZATO")
+                log(f"    ({j}/{total_ex}) {exercise_dir.name} - GIA' ANALIZZATO")
                 continue
 
             log(f"    ({j}/{total_ex}) Esercizio: {exercise_dir.name}")
-            log(f"       → Selezione commit...")
             reset_model_usage()
+            analysis_record = analysis_by_exercise.get(exercise_dir.name)
+            if not analysis_record:
+                log(f"       Nessun risultato Bash per {exercise_dir.name}, salto")
+                continue
 
-            commits = get_commits(student_dir)[:3]  # LIMITATI A 3 COMMITS
-            selected_commit = None
+            compile_ok = bool(analysis_record.get("compile_success"))
+            test_ok = bool(analysis_record.get("test_success"))
+            stdout = analysis_record.get("stdout", "") or ""
+            stderr = analysis_record.get("stderr", "") or ""
+            feedback_text = clean_feedback_for_json(analysis_record.get("test_feedback", "") or "")
+            program_out = analysis_record.get("program_output", "") or "The program produced no output."
+            warnings = normalize_static_warnings(analysis_record.get("static_warnings", []))
+            failure = analysis_record.get("failure_category") or classify_failure_category(feedback_text)
+            compile_log = stderr if not compile_ok else ""
 
-            # =======================
-            # SELEZIONE COMMIT SU COPIA TEMPORANEA CON git show
-            # =======================
-            import tempfile, subprocess, shutil
-
-            with tempfile.TemporaryDirectory() as tmpdir:
-                temp_ex_dir = Path(tmpdir) / exercise_dir.name
-                temp_ex_dir.mkdir(parents=True, exist_ok=True)
-
-                for commit in commits:
-                    # Estrai tutti i file dell'esercizio dal commit senza fare checkout
-                    files = subprocess.run(
-                        ["git", "ls-tree", "-r", "--name-only", commit, str(exercise_dir)],
-                        cwd=student_dir,
-                        capture_output=True,
-                        text=True
-                    ).stdout.strip().splitlines()
-
-                    for f in files:
-                        f_path = Path(f)
-                        # estrai il percorso relativo all'esercizio (non al repo)
-                        try:
-                            rel_path = f_path.relative_to(exercise_dir.name)
-                        except ValueError:
-                            # fallback: prendi solo il nome file
-                            rel_path = f_path.name
-
-                        dest_path = temp_ex_dir / rel_path
-                        dest_path.parent.mkdir(parents=True, exist_ok=True)
-
-                        blob_content = subprocess.run(
-                            ["git", "show", f"{commit}:{f}"],
-                            cwd=student_dir,
-                            capture_output=True
-                        ).stdout
-                        with open(dest_path, "wb") as out_file:
-                            out_file.write(blob_content)
-
-                    # Compilazione e test sulla copia temporanea
-                    compile_ok, _ = compile_exercise(temp_ex_dir)
-                    temp_warnings = []
-                    if compile_ok:
-                        test_ok, _, _, _, _ = run_tests_compat(temp_ex_dir)
-                        if test_ok:
-                            temp_warnings = run_static_analysis(temp_ex_dir)
-                    else:
-                        test_ok = False
-
-                    # Regole per scegliere commit
-                    prefer_static_failure = static_failure_count < max(4, correct_count // 5)
-
-                    if test_ok and temp_warnings and prefer_static_failure:
-                        selected_commit = commit
-                        break
-                    elif test_ok and incorrect_count > correct_count:
-                        selected_commit = commit
-                        break
-                    elif not test_ok and correct_count >= incorrect_count:
-                        selected_commit = commit
-                        break
-
-                    # Pulisci temp_ex_dir per il prossimo commit
-                    shutil.rmtree(temp_ex_dir)
-                    temp_ex_dir.mkdir(parents=True, exist_ok=True)
-
-            # Fallback se nessun commit scelto
-            if selected_commit is None:
-                selected_commit = commits[0] if commits else "HEAD"
-
-            # =======================
-            # CHECKOUT FINALE SUL REPO REALE
-            # =======================
-            if selected_commit == "HEAD":
-                checkout_head(student_dir)
-            else:
-                checkout_commit(student_dir, selected_commit)
-
-            # =======================
-            # COPIA TEST PERSONALIZZATI
-            # =======================
-            inject_tests(student_dir, exercise_dir)
-
-            # Compilazione ed esecuzione finale
-            log(f"       → Compilazione...")
-            compile_ok, compile_log = compile_exercise(exercise_dir)
-            log(f"       → Compilazione: {'✓ OK' if compile_ok else '✗ FAIL'}")
+            log(f"       Analisi Bash: categoria={failure}, compile={'OK' if compile_ok else 'FAIL'}, test={'PASS' if test_ok else 'FAIL'}, warnings={len(warnings)}")
             
-            log(f"       → Test esecuzione...")
-            test_ok, stdout, stderr, program_out, feedback_text = run_tests_compat(exercise_dir)
-            log(f"       → Test: {'✓ PASS' if test_ok else '✗ FAIL'}")
-            
-            log(f"       → Analisi statica...")
-            warnings = run_static_analysis(exercise_dir)
-            log(f"       → Avvisi: {len(warnings) if warnings else 0}")
-
-            if test_ok and warnings:
-                failure = "static_failure"
-            else:
-                failure = classify_failure_category(feedback_text)
-
             # =======================
             # ANALISI LLM
             # =======================
@@ -2649,6 +2715,12 @@ def main():
             results.append(result)
             already_done.add((student_name, exercise_dir.name))
             save_results(results)
+            if failure == "correct":
+                correct_count += 1
+            else:
+                incorrect_count += 1
+            if failure == "static_failure":
+                static_failure_count += 1
 
     log("FINISHED")
     print_token_costs()
