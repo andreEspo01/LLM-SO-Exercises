@@ -18,12 +18,12 @@ perl -n -e '
 BEGIN { %pid=(); $cur_server=0; $sent=0; $received=0; }
 if(/Client\s(\d+):\sinvio\smessaggio\snumero\s(\d+)/) { $pid{$1}++; $sent++; }
 if(/Balancer:\sricezione\smessaggio\sdal\sprocesso\s(\d+),\sinvio\sal\sserver\s(\d)/) {
-    if(!exists($pid{$1})) { print "Il balancer riceve un messaggio da un client che non ha effettuato alcun invio\n"; exit(1); }
+    if(!exists($pid{$1})) { print "Il balancer riceve un messaggio con un PID client che non coincide con nessuno dei client che hanno effettuato un invio\n"; exit(1); }
     if($2 != $cur_server + 1) { print "Il balancer non distribuisce i messaggi con politica round-robin sul server atteso\n"; exit(1); }
     $cur_server = ($cur_server + 1) % 3;
 }
 if(/Server\s\d+:\sricezione\smessaggio\snumero\s\d+\sdal\sprocesso\s(\d+)/) {
-    if(!exists($pid{$1})) { print "Un server riceve un messaggio da un client sconosciuto al balancer\n"; exit(1); }
+    if(!exists($pid{$1})) { print "Un server riceve un messaggio con un PID client che non coincide con nessuno dei client noti al balancer\n"; exit(1); }
     $received++;
 }
 END {
@@ -45,3 +45,4 @@ static_analysis
 
 
 success
+
