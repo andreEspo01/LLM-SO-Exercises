@@ -19,14 +19,14 @@ BEGIN { %msg=(); }
 if(/\[(\d+)\]\sClient:\sinvio\srequest-to-send/) { $msg{$1} = {}; }
 if(/\[\d+\]\sServer:\sricevuto\srequest-to-send,\s\w+?=(\d+)/) {
     if(!exists($msg{$1})) {
-        print "Il server riceve una request-to-send per un tipo di messaggio non richiesto da alcun client\n";
+        print "Il server riceve una request-to-send con campo tipo errato, che non coincide con il PID di alcun client\n";
         exit(1);
     }
 }
 if(/\[\d+\]\sServer:\sinvio\sok-to-send,\stype=(\d+),\sid_coda=(\d+)/) { $msg{$1}{"coda"} = $2; }
 if(/\[(\d+)\]\sClient:\sricevuto\sok-to-send.*\stype=(\d+),\sid_coda=(\d+)/) {
     if($1 != $2) {
-        print "Il client riceve un ok-to-send con un tipo diverso da quello richiesto\n";
+        print "Il client riceve un ok-to-send con campo tipo errato, che non coincide con il PID del client che lo ha richiesto\n";
         exit(1);
     }
     if(!exists($msg{$2}) || $msg{$2}{"coda"} != $3) {
@@ -37,7 +37,7 @@ if(/\[(\d+)\]\sClient:\sricevuto\sok-to-send.*\stype=(\d+),\sid_coda=(\d+)/) {
 if(/\[\d+\]\sClient:\sinvio\smessaggio,\scoda=(\d+),\stype=(\d+),\svalore=(\d+)/) { $msg{$2}{"val"} = $3; }
 if(/\[\d+\]\sServer:\sricevuto\smessaggio,\stype=(\d+),\svalore=(\d+)/) {
     if(!exists($msg{$1}) || $msg{$1}{"val"} != $2) {
-        print "Il server riceve un messaggio con tipo o valore incoerente rispetto a quello inviato dal client\n";
+        print "Il server riceve un messaggio con campo tipo non coerente con il PID del client, oppure con un valore incoerente rispetto a quello inviato dal client\n";
         exit(1);
     }
 }
@@ -57,3 +57,4 @@ static_analysis
 
 
 success
+
