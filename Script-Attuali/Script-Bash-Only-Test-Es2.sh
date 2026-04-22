@@ -315,13 +315,8 @@ analyze_exercise_once() {
         compile_log="$compile_result"
     fi
 
-    local static_warnings
-    static_warnings=$(run_static_analysis "$exercise_path")
-    
+    local static_warnings="[]"
     local has_static_warnings="false"
-    if [ "$static_warnings" != "[]" ] && [ -n "$static_warnings" ]; then
-        has_static_warnings="true"
-    fi
 
     local test_ok="false"
     local test_feedback=""
@@ -363,7 +358,15 @@ analyze_exercise_once() {
     fi
 
     local failure_category
-    failure_category=$(classify_failure "$compile_ok" "$test_ok" "$has_static_warnings" "/tmp/feedback.md")
+    failure_category=$(classify_failure "$compile_ok" "$test_ok" "false" "/tmp/feedback.md")
+
+    if [ "$compile_ok" = "true" ] && [ "$test_ok" = "true" ]; then
+        static_warnings=$(run_static_analysis "$exercise_path")
+        if [ "$static_warnings" != "[]" ] && [ -n "$static_warnings" ]; then
+            has_static_warnings="true"
+            failure_category="static_failure"
+        fi
+    fi
 
     local output_stderr output_stdout output_feedback
     if [ "$compile_ok" = "false" ]; then
@@ -611,4 +614,5 @@ if [ "$MODE" = "single_student_commit" ]; then
 else
     run_batch_mode
 fi
+
 

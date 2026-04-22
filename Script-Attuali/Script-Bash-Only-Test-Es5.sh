@@ -119,10 +119,10 @@ init_results_file() {
     if ! jq -e 'type == "array"' "$OUTPUT_FILE" >/dev/null 2>&1; then
         local backup_file="${OUTPUT_FILE}.invalid.$(date +%s).bak"
         if mv "$OUTPUT_FILE" "$backup_file" 2>/dev/null; then
-            echo "? JSON output non valido, creato backup: $backup_file" >&2
+            echo "JSON output non valido, creato backup: $backup_file" >&2
         else
             rm -f "$OUTPUT_FILE"
-            echo "? JSON output non valido, file rigenerato da zero." >&2
+            echo "JSON output non valido, file rigenerato da zero." >&2
         fi
         echo "[]" > "$OUTPUT_FILE"
     fi
@@ -256,7 +256,7 @@ save_json_result() {
         local student="$1"
         local exercise="$2"
         local commit="$3"
-        echo "? Error building JSON record: $student / $exercise / $commit" >&2
+        echo "Error building JSON record: $student / $exercise / $commit" >&2
         return
     fi
 
@@ -265,17 +265,17 @@ save_json_result() {
     # Aggiungi il record all'array in modo atomico, senza lasciare il file vuoto su errore
     local tmp_output
     tmp_output=$(mktemp) || {
-        echo "? Error creating temp file: $student / $exercise / $commit" >&2
+        echo "Error creating temp file: $student / $exercise / $commit" >&2
         return
     }
 
     if jq --argjson record "$record" '. += [$record]' "$OUTPUT_FILE" > "$tmp_output" 2>/dev/null; then
         mv "$tmp_output" "$OUTPUT_FILE"
         ((RECORDS_SAVED++))
-        echo "? Saved: $student / $exercise / $commit" >&2
+        echo "Saved: $student / $exercise / $commit" >&2
     else
         rm -f "$tmp_output"
-        echo "? Error saving: $student / $exercise / $commit" >&2
+        echo "Error saving: $student / $exercise / $commit" >&2
     fi
 }
 
@@ -312,13 +312,8 @@ analyze_exercise_once() {
         compile_log="$compile_result"
     fi
 
-    local static_warnings
-    static_warnings=$(run_static_analysis "$exercise_path")
-    
+    local static_warnings="[]"
     local has_static_warnings="false"
-    if [ "$static_warnings" != "[]" ] && [ -n "$static_warnings" ]; then
-        has_static_warnings="true"
-    fi
 
     local test_ok="false"
     local test_feedback=""
@@ -360,13 +355,21 @@ analyze_exercise_once() {
     fi
 
     local failure_category
-    failure_category=$(classify_failure "$compile_ok" "$test_ok" "$has_static_warnings" "/tmp/feedback.md")
+    failure_category=$(classify_failure "$compile_ok" "$test_ok" "false" "/tmp/feedback.md")
+
+    if [ "$compile_ok" = "true" ] && [ "$test_ok" = "true" ]; then
+        static_warnings=$(run_static_analysis "$exercise_path")
+        if [ "$static_warnings" != "[]" ] && [ -n "$static_warnings" ]; then
+            has_static_warnings="true"
+            failure_category="static_failure"
+        fi
+    fi
 
     local output_stderr output_stdout output_feedback
     if [ "$compile_ok" = "false" ]; then
         output_stderr="$compile_log"
         output_stdout="fail"
-        output_feedback="Il programma non ? stato compilato."
+        output_feedback="Il programma non è stato compilato."
     else
         output_stderr="$test_stderr"
         output_stdout="$test_stdout"
@@ -444,7 +447,7 @@ classify_failure() {
     local has_warnings="$3"
     local feedback_file="$4"
     
-    # Se non c'? file feedback, usa logica semplice
+    # Se non c'è file feedback, usa logica semplice
     if [ ! -f "$feedback_file" ]; then
         if [ "$compile_ok" = "false" ]; then
             echo "compile_failure"
@@ -608,4 +611,5 @@ if [ "$MODE" = "single_student_commit" ]; then
 else
     run_batch_mode
 fi
+
 

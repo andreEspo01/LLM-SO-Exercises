@@ -59,7 +59,7 @@ else:
 COMPILE_TIMEOUT = 120
 TEST_TIMEOUT = 120
 BASH_ANALYSIS_TIMEOUT = 900
-BASH_ANALYSIS_SCRIPT = "/home/andre/Script-Bash-Only-Test.sh"
+BASH_ANALYSIS_SCRIPT = "/home/andre/Script-Bash-Only-Test-Es5.sh"
 COMMIT_SELECTION_WINDOW = 4
 
 LLM_CONNECT_TIMEOUT = 60
@@ -69,7 +69,7 @@ OUTPUT_FILE = "risultati_es5.json"
 LOG_SAMPLE_DIR = "experiment_logs"
 LLM_CACHE_FILE = "llm_cache.json"
 
-MAX_STUDENTS = 5  # Per limitare il numero di studenti analizzati (None per tutti)
+MAX_STUDENTS = None  # Per limitare il numero di studenti analizzati (None per tutti)
 
 # ==========================================
 
@@ -1313,8 +1313,8 @@ def run_primary_output_analysis(readme, program_output):
         ["Output_Correct", "Output_Diagnosis"],
     )
 
-def run_primary_code_analysis(readme, program_output, code):
-    prompt = prompt_codice(readme, program_output, code)
+def run_primary_code_analysis(readme, program_output, code, failure_category=None, output_diagnosis=""):
+    prompt = prompt_codice(readme, program_output, code, failure_category=failure_category, output_diagnosis=output_diagnosis)
     first = query_model(prompt, PRIMARY_MODEL, role="PRIMARY")
 
     # fallback/repair
@@ -1434,32 +1434,28 @@ Decision rules:
 - If the mismatch is about values, counts, ordering, or pairing, mention the concrete operation family involved.
 - If an operation name visibly encodes arithmetic or protocol meaning, such as SOMMA/sum, product, request, reply, consume, or produce, use that meaning when judging visible value or trace mismatches.
 - Do not reinterpret a client-visible field named `risultato` as a mere acknowledgment unless the trace explicitly labels it as ack/ok/status and not as an operation result.
-- In request/reply style traces, each client-visible reply must be judged as the result of the immediately preceding request for the same actor, not as a generic protocol acknowledgment.
-- When a request visibly carries operands, parameters, message ids, or payload values, check the corresponding visible reply or forwarded value against those exact visible inputs whenever the operation semantics make that check possible.
-- + If the trace gives enough information to validate values one by one, you MUST explicitly recompute those values step by step before claiming a mismatch. Do not rely on intuition or approximate reasoning for arithmetic checks. A YES answer should mean that the visible exchanged values are individually consistent, not just globally plausible.
-- If a later consume/receive/dequeue/read returns a meaningful value before the corresponding produce/send/enqueue/write phase is visibly established, do not use that later value as evidence that the earlier phase was correct.
-- If a semantic operation such as SUM/PRODUCT receives a visible reply that conflicts with a later visible produced or consumed value in the same trace family, treat that as a concrete mismatch.
-- If a request receives an immediate visible reply with a placeholder or semantically wrong value, and the meaningful result later appears as the outcome of a different operation such as consume/dequeue/read, treat that as a wrong request/reply association and mark NO.
-- If several requests of the same family receive the same placeholder-looking reply, and meaningful values appear only later in a different phase of the trace, do not call the output correct: this is visible request/reply misassociation, not valid delayed confirmation.
-- In request/reply traces, judge each client-visible reply against the request that immediately precedes it for the same actor; a later downstream result does not retroactively validate an earlier reply.
-- If a client-visible reply (e.g., risultato) is immediately returned with value 0 or another trivial/placeholder value for operations that visibly require computation (e.g., SUM, PRODUCT), treat it as incorrect unless the trace explicitly defines that value as a valid result.
-- CRITICAL: If any operation visibly carries semantic meaning (e.g., arithmetic function names, retrieval, computation, aggregation) and the immediate reply is 0 or a placeholder value, and later operations in the same trace produce different non-zero values, this indicates a protocol violation or wrong value association. Mark NO.
-- COUNT VERIFICATION: Count the number of each operation family mentioned in the trace (requests, responses, produces, consumes, writes, reads, etc.). If counts appear inconsistent with the exercise semantics or if the expected number of operation cycles cannot be verified, mark NO.
-- PLACEHOLDER PATTERN DETECTION: Mark as NO if you observe that operation classes which should produce computed or aggregated results consistently return placeholder values (0, NULL, empty) in client-visible replies, while meaningful values appear only in later phases or different traces. This indicates wrong request/reply association or missing computation propagation.
+- Symmetrically, do not assume that a field named `risultato` must carry the produced payload or computed value unless that contract is explicit in the exercise description or visible trace.
+- In request/reply style traces, pair each visible reply with the immediately preceding request for the same actor when that pairing is visible.
+- When a request visibly carries operands, parameters, message ids, or payload values, check the corresponding visible reply or forwarded value against those exact visible inputs only when the exercise description or trace makes that value contract explicit.
+- If the trace gives enough information to validate values one by one, explicitly recompute those values before claiming a mismatch. Do not rely on intuition or operation names alone for arithmetic checks.
+- A later consume/receive/dequeue/read that reveals meaningful data does not by itself prove that an earlier produce/send/enqueue/store reply was wrong: many protocols legitimately return only success/error for side-effecting operations.
+- Treat an immediate reply value such as 0 as incorrect only when the trace or exercise explicitly requires a computed or payload value at that point, or when the reply concretely contradicts visible operands, ids, counts, or another explicit value expectation.
+- Operation names alone are not enough to infer the exact reply payload semantics, especially for side-effecting operations such as produce, send, store, enqueue, register, or submit.
+- Count the number of each operation family mentioned in the trace (requests, responses, produces, consumes, writes, reads, etc.). If counts appear inconsistent with the visible protocol or if the expected number of operation cycles cannot be verified, mark NO.
 - If the test feedback explicitly reports an incorrect execution or mismatch (e.g., "non è corretto", "numero... non corrisponde", "errore nel valore"), treat this as a strong signal that Output_Correct should be NO, even if the trace structure appears coherent.
-- SEMANTIC MISMATCH: In any protocol trace, if an immediately returned result contradicts the semantic meaning implied by operation names or parameters, mark NO. Do not assume hidden computation or delayed value propagation.
-- If multiple client-visible replies return identical placeholder-like values while later phases (e.g., worker logs or consumer outputs) show meaningful computed values, this indicates a visible misassociation between requests and replies. Mark NO.
+- SEMANTIC MISMATCH: In any protocol trace, mark NO only when an immediately returned result contradicts a value contract that is explicit in the description or visible trace. Do not derive the whole reply semantics from operation names alone.
+- If multiple client-visible replies return identical values, do not treat that as a defect by itself unless the trace explicitly shows those replies should differ or should carry per-request payloads.
 - If a client receives a result before the corresponding server-side or worker-side computation is visibly completed in the trace, do not assume correctness. This is a visible ordering violation; mark NO.
 - If the trace shows that meaningful computation results appear only in worker logs or downstream phases, but not in the immediate client-visible replies, do not treat the output as correct. The client-visible interaction is the authoritative observable behavior.
-- If the same operation (e.g., PRODUCI CON SOMMA) appears with a visible expected arithmetic meaning, and the corresponding reply does not reflect that meaning at the point of the reply, mark NO even if the correct value appears later in a different part of the trace.
+- If the trace explicitly states that an operation's immediate reply must expose an arithmetic or payload result, and the visible reply does not match that requirement, mark NO even if the value appears later elsewhere.
 - If the ordering of phases (e.g., consumer actions appearing before producer actions) suggests missing initialization or implicit preloaded state that is not explicitly shown, do not assume correctness. Mark NO.
 - If the trace is compatible with both a correct and an incorrect execution due to missing or ambiguous evidence, prefer NO rather than YES.
 - If a central semantic property (e.g., correct RPC result, correct request/reply association, correct propagation of values) cannot be directly validated from the visible trace, do not mark the output as correct.
-- If client-visible results contradict the semantics of the operation name (e.g., SUM, PRODUCE, CONSUME), prioritize the semantic mismatch over any later consistency in the trace and mark NO.
+- If client-visible results contradict semantics that are explicitly defined in the description or trace, prioritize that mismatch over later consistency in the trace and mark NO. Do not infer full reply semantics from operation names alone.
 - If the trace shows interleaving where requests and replies cannot be unambiguously paired based on visible ordering and values, treat this as a protocol violation and mark NO.
 - If a reply is observed with a value that is later produced or consumed by a different operation, do not retroactively validate the reply. Each reply must be correct at the time it is observed.
-- If the visible trace suggests that results are delivered through a different mechanism than the expected request/reply protocol (e.g., values appear only via consume instead of reply), treat this as a protocol violation and mark NO.
-- If the only apparent evidence for correctness comes from a later phase of the trace, while the earlier reply itself is placeholder-like, under-informative, or semantically incompatible with the request, prefer NO.
+- If the visible trace suggests that results are delivered through a different mechanism than the expected protocol, mark NO only when the description or trace explicitly requires the earlier phase to expose that result directly.
+- If the only apparent evidence for correctness comes from a later phase of the trace, prefer NO only when the earlier phase is explicitly required to expose the same result and does not do so.
 - If a later phase appears before an earlier prerequisite phase in the visible trace, and no explicit initialization, preload, warm-start, or prior state is shown, prefer NO rather than assuming an unseen valid setup.
 - If a server-side or worker-side log appears to compute the meaningful value only after a client has already received an incompatible reply, the output is still wrong from the client's point of view.
 - Do not treat later queue contents, consume results, dequeue results, or worker logs as proof that an earlier RPC reply was correct.
@@ -1470,7 +1466,7 @@ Decision rules:
 - If downstream recipients show data before the upstream source or central routing/processing phase is visibly established, do not infer a correct end-to-end trace from that ordering alone.
 - EXPLICIT OPERATION COUNTING RULE: In any request/response, producer/consumer, reader/writer, or client/server interaction, count the exact number of each operation type visible in the trace. If counts cannot be verified to be consistent with the protocol semantics (e.g., same number of requests and replies, matching producer and consumer pairs), mark NO with evidence.
 - FEEDBACK INTEGRATION: If the actual test output or feedback mentions any execution error (regardless of phrasing), treat this as a strong signal that Output_Correct should be NO, even if the trace structure appears internally sound. Do not dismiss test feedback as secondary evidence.
-- VALUE RECONCILIATION: For any operation that produces, retrieves, or transfers a value, verify that the value is coherently associated with its operation at the point of observation. If values cannot be traced back to their source operation, or if an operation returns a placeholder while the same semantic value appears elsewhere, mark NO.
+- VALUE RECONCILIATION: For any operation that produces, retrieves, or transfers a value, verify coherence only against value flows that are explicit in the description or trace. Do not mark NO merely because a later operation reveals a value that an earlier side-effecting operation did not visibly return.
 - OPERATION FAMILY CONSISTENCY: Group operations by semantic family (request/reply pair, enqueue/dequeue pair, read/write pair, etc.). Within each family, the trace must show consistent pairing and value flow. If one family shows coherent behavior while related families show placeholder values or missing matches, mark NO.
 - If the trace shows interleaving where operations cannot be unambiguously associated back to their semantic intent based on visible identifiers, ordering, or values, treat this as a protocol violation and mark NO.
 - If multiple mismatches are visible, report the most central one first and optionally add one closely related consequence.
@@ -1494,7 +1490,22 @@ Output_Diagnosis: <detailed evidence-based diagnosis>
 """
 
 
-def prompt_codice(readme, program_output, code):
+def prompt_codice(readme, program_output, code, failure_category=None, output_diagnosis=""):
+    runtime_focus = ""
+    if failure_category in {"dynamic_failure", "timeout", "ipc_leak", "crash"}:
+        runtime_focus = f"""
+
+Runtime-failure focus:
+- The observed runtime failure category is: {failure_category}
+- The current output diagnosis is:
+{output_diagnosis or "No output diagnosis available."}
+- In this case, do NOT look for a generic bug or a secondary static issue.
+- Identify only the code cause that best explains why the execution failed in that specific way.
+- First verify that the reported runtime symptom is grounded in an explicit contract from the exercise or visible trace.
+- If the reported symptom depends on assuming that an immediate reply must carry a produced/computed payload, but that contract is not explicit, do not adopt that assumption as the target defect.
+- If the code only shows unrelated issues that do not explain that runtime failure, answer YES rather than inventing a different NO diagnosis.
+"""
+
     return f"""
 Evaluate the C CODE.
 
@@ -1520,6 +1531,7 @@ Exercise description:
 
 Observed runtime/output:
 {program_output}
+{runtime_focus}
 
 Code:
 {code}
@@ -1545,6 +1557,9 @@ Decision rules:
 - Do not answer YES merely because one specific API name is absent. If the visible implementation of the relevant code path omits the required mechanism, selector, synchronization policy, cleanup step, or ownership pattern, that omission may itself justify NO.
 - Do not diagnose generic error-handling defects such as missing return-value checks, missing errno checks, or missing validation unless the observed failure is about that path or the code makes that defect the central visible cause.
 - When runtime feedback is only black-box and the code does not show one explicit violating statement or omission, prefer YES over a speculative NO.
+- For dynamic_failure, timeout, ipc_leak, or crash, use the provided output diagnosis as the target symptom and explain the concrete code cause of that failure, not a different secondary issue that could exist even if execution succeeded.
+- For dynamic_failure, timeout, ipc_leak, or crash, do not use rule-style static findings or generic code smells as evidence unless they directly explain the observed runtime failure.
+- For dynamic_failure, timeout, ipc_leak, or crash, if the code does not show a concrete cause for the observed runtime symptom, prefer YES over diagnosing a different unrelated bug.
 - Only say that no concrete code is visible if the prompt genuinely does not contain line-numbered C source. When file blocks are shown, analyze those files instead of falling back to a visibility disclaimer.
 - When possible, explain both the violated code pattern and the concrete consequence on the protocol/runtime.
 - If Code_Correct = NO, the diagnosis must explicitly cite at least:
@@ -1558,6 +1573,8 @@ Decision rules:
 - For protocol-matching defects, cite both sides of the mismatch when possible.
 - For synchronization defects, cite both the protected operation and the visible locking or missing-locking context.
 - If the runtime symptom is a wrong request/reply association, wrong operation result, or wrong visible protocol pairing, prefer a code defect that plausibly explains that central symptom instead of unrelated error-checking omissions.
+- Do not diagnose a constant or zero reply field as a defect unless the exercise description or visible runtime symptom explicitly shows that this reply field must carry the produced or computed payload for that operation.
+- For side-effecting operations such as produce, send, store, enqueue, or register, a later consume/read/dequeue revealing the value does not by itself prove that the earlier reply field is wrong.
 - ERROR HANDLING RULE: Do NOT diagnose error-handling defects unless they directly cause the observed runtime failure:
   * Do not diagnose missing checks on malloc/calloc/queue-creation/thread-creation failures unless the test output shows the program actually crashed or produced wrong output due to that failure.
   * Do not diagnose memory leaks in error paths (e.g., "allocated but not freed if pthread_create fails") because the test suite does not induce these anomalous failure conditions.
@@ -2486,6 +2503,8 @@ def main():
             program_out = analysis_record.get("program_output", "") or "The program produced no output."
             warnings = normalize_static_warnings(analysis_record.get("static_warnings", []))
             failure = analysis_record.get("failure_category") or classify_failure_category(feedback_text)
+            if failure in ["dynamic_failure", "crash", "timeout", "ipc_leak"]:
+                warnings = []
             compile_log = stderr if not compile_ok else ""
 
             log(f"       Analisi Bash: categoria={failure}, compile={'OK' if compile_ok else 'FAIL'}, test={'PASS' if test_ok else 'FAIL'}, warnings={len(warnings)}")
@@ -2504,23 +2523,23 @@ def main():
             compile_context = compile_log if compile_log.strip() else stderr
 
             if failure == "compile_failure":
-                log(f"       → Categoria: COMPILE_FAILURE")
+                log(f"       Categoria: COMPILE_FAILURE")
                 output_corr = "NO"
                 code_corr = "NO"
                 diag_output = ""
                 diag_code = ""
 
-            # correct → LLM primario e giudici
+            # correct è LLM primario e giudici
             elif failure == "correct":
-                log(f"       → Categoria: CORRECT")
+                log(f"       Categoria: CORRECT")
                 # ===== LLM =====
-                log(f"       → [LLM] Analisi Output...")
+                log(f"       [LLM] Analisi Output...")
                 resp_output = run_primary_output_analysis(readme, program_out)
-                log(f"       → [LLM] Output: ✓")
+                log(f"       [LLM] Output:")
                 
-                log(f"       → [LLM] Analisi Codice (correct mode)...")
+                log(f"       [LLM] Analisi Codice (correct mode)...")
                 resp_code = run_primary_correct_code_analysis(readme, program_out, code)
-                log(f"       → [LLM] Codice: ✓")
+                log(f"       [LLM] Codice:")
 
                 fields_output = parse_response(resp_output, ["Output_Correct", "Output_Diagnosis"])
                 fields_code = parse_response(resp_code, ["Code_Correct", "Code_Diagnosis"])
@@ -2571,33 +2590,40 @@ def main():
                     judge_code_ok = judge_code.get("Diagnosis_Correct", "")
                     judge_code_motivation = judge_code.get("Judge_Motivation", "")
 
-            # dynamic / crash / timeout / ipc → LLM + giudici normali
+            # dynamic / crash / timeout / ipc è LLM + giudici normali
             elif failure in ["dynamic_failure", "crash", "timeout", "ipc_leak"]:
-                log(f"       → Categoria: {failure.upper()}")
+                log(f"       Categoria: {failure.upper()}")
                 # ===== LLM =====
-                log(f"       → [LLM] Analisi Output...")
+                log(f"       [LLM] Analisi Output...")
                 resp_output = run_primary_output_analysis(readme, program_out)
-                log(f"       → [LLM] Output: ✓")
-                
-                log(f"       → [LLM] Analisi Codice...")
-                resp_code = run_primary_code_analysis(readme, program_out, code)
-                log(f"       → [LLM] Codice: ✓")
+                log(f"       [LLM] Output:")
 
                 fields_output = parse_response(resp_output, ["Output_Correct", "Output_Diagnosis"])
-                fields_code = parse_response(resp_code, ["Code_Correct", "Code_Diagnosis"])
 
                 output_corr = fields_output.get("Output_Correct", "")
                 diag_output = fields_output.get("Output_Diagnosis", "")
-                code_corr = fields_code.get("Code_Correct", "")
-                diag_code = fields_code.get("Code_Diagnosis", "")
                     
-                if not diag_output:
+                if diag_output:
                     diag_output = normalize_diagnosis(diag_output)
 
                 if diag_output:
                     judge_out = judge_output_with_fallback(diag_output, failure, feedback_text)
                     judge_out_ok = judge_out.get("Diagnosis_Correct", "")
                     judge_out_motivation = judge_out.get("Judge_Motivation", "")
+
+                log(f"       [LLM] Analisi Codice...")
+                resp_code = run_primary_code_analysis(
+                    readme,
+                    program_out,
+                    code,
+                    failure_category=failure,
+                    output_diagnosis=diag_output,
+                )
+                log(f"       [LLM] Codice:")
+
+                fields_code = parse_response(resp_code, ["Code_Correct", "Code_Diagnosis"])
+                code_corr = fields_code.get("Code_Correct", "")
+                diag_code = fields_code.get("Code_Diagnosis", "")
 
                 if diag_code:
                     diag_code = normalize_diagnosis(diag_code)
@@ -2632,17 +2658,17 @@ def main():
                     judge_code_ok = judge_code.get("Diagnosis_Correct", "")
                     judge_code_motivation = judge_code.get("Judge_Motivation", "")
 
-            # static_failure → LLM static + giudice static
+            # static_failure è LLM static + giudice static
             elif failure == "static_failure":
-                log(f"       → Categoria: STATIC_FAILURE (avvisi: {len(warnings)})")
+                log(f"       Categoria: STATIC_FAILURE (avvisi: {len(warnings)})")
                 # ===== LLM =====
-                log(f"       → [LLM] Analisi Output...")
+                log(f"       [LLM] Analisi Output...")
                 resp_output = run_primary_output_analysis(readme, program_out)
-                log(f"       → [LLM] Output: ✓")
+                log(f"       [LLM] Output:")
                 
-                log(f"       → [LLM] Analisi Statica Codice...")
+                log(f"       [LLM] Analisi Statica Codice...")
                 resp_code = run_primary_static_code_analysis(readme, code)
-                log(f"       → [LLM] Codice Statico: ✓")
+                log(f"       [LLM] Codice Statico:")
 
                 fields_output = parse_response(resp_output, ["Output_Correct", "Output_Diagnosis"])
                 fields_code = parse_response(resp_code, ["Code_Correct", "Code_Diagnosis"])
@@ -2728,3 +2754,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
