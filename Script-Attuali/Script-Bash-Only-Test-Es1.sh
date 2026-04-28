@@ -250,6 +250,31 @@ run_static_analysis() {
     printf '%s\n' "$warnings_json"
 }
 
+feedback_suggests_static_only() {
+    local feedback_text="$1"
+    printf '%s' "$feedback_text" | grep -q "difetti all'interno del codice"
+}
+
+has_obvious_runtime_failure() {
+    local program_output="$1"
+    local test_feedback="$2"
+    local test_stderr="$3"
+    local combined
+
+    if [ "$program_output" = "The program produced no output." ]; then
+        return 0
+    fi
+
+    combined=$(printf '%s\n%s\n%s\n' "$program_output" "$test_feedback" "$test_stderr")
+
+    if printf '%s' "$combined" | grep -Eiq \
+        'Errore exec|Errore execl|Invalid argument|Errore attach shared memory|Errore msgrcv|Errore msgsnd|Identifier removed|No such file or directory|Segmentation fault|core dumped|Aborted|Assertion|Errore creazione|cannot execute|Permission denied'; then
+        return 0
+    fi
+
+    return 1
+}
+
 # Salva record JSON in modo sicuro usando jq per escaping e append
 save_json_result() {
     local record
@@ -327,7 +352,7 @@ analyze_exercise_once() {
     test_script_name=$(get_test_script_name "$exercise")
 
     if [ -n "$test_script_name" ] && [ -f ".test/$test_script_name" ]; then
-        rm -f /tmp/feedback.md /tmp/output.txt /tmp/error-log.txt /tmp/test_stderr.txt 2>/dev/null || true
+        rm -f /tmp/feedback.md /tmp/output.txt /tmp/minimo.txt /tmp/error-log.txt /tmp/test_stderr.txt 2>/dev/null || true
 
         test_stdout=$(cd ".test" && bash "$test_script_name" 2>/tmp/test_stderr.txt)
         local test_exit=$?
@@ -347,6 +372,20 @@ analyze_exercise_once() {
             fi
         fi
 
+        # Fallback: alcuni test script usano file di output diversi (es. /tmp/minimo.txt)
+        if [ "$program_output" = "The program produced no output." ]; then
+            for _alt_output in /tmp/minimo.txt; do
+                if [ -f "$_alt_output" ]; then
+                    local _alt_content
+                    _alt_content=$(cat "$_alt_output" 2>/dev/null)
+                    if [ -n "${_alt_content// }" ]; then
+                        program_output="$_alt_content"
+                        break
+                    fi
+                fi
+            done
+        fi
+
         if [ $test_exit -eq 0 ] && echo "$test_stdout" | grep -q "^pass$"; then
             test_ok="true"
             TOTAL_TESTS_PASSED=$((TOTAL_TESTS_PASSED + 1))
@@ -360,11 +399,38 @@ analyze_exercise_once() {
     local failure_category
     failure_category=$(classify_failure "$compile_ok" "$test_ok" "false" "/tmp/feedback.md")
 
-    if [ "$compile_ok" = "true" ] && [ "$test_ok" = "true" ]; then
+    local runtime_obviously_broken="false"
+    if has_obvious_runtime_failure "$program_output" "$test_feedback" "$test_stderr"; then
+        runtime_obviously_broken="true"
+    fi
+
+    local should_run_static="false"
+    if [ "$compile_ok" = "true" ]; then
+        if [ "$test_ok" = "true" ]; then
+            should_run_static="true"
+        elif feedback_suggests_static_only "$test_feedback" && [ "$runtime_obviously_broken" = "false" ]; then
+            should_run_static="true"
+        fi
+    fi
+
+    if [ "$should_run_static" = "true" ]; then
         static_warnings=$(run_static_analysis "$exercise_path")
         if [ "$static_warnings" != "[]" ] && [ -n "$static_warnings" ]; then
             has_static_warnings="true"
             failure_category="static_failure"
+        fi
+    fi
+
+    if [ "$runtime_obviously_broken" = "true" ]; then
+        if [ "$failure_category" = "correct" ] || [ "$failure_category" = "static_failure" ]; then
+            failure_category="dynamic_failure"
+        fi
+        if [ "$test_ok" = "true" ]; then
+            test_ok="false"
+        fi
+        if [ "$failure_category" != "static_failure" ]; then
+            static_warnings="[]"
+            has_static_warnings="false"
         fi
     fi
 
