@@ -15,12 +15,15 @@ plt.rcParams["font.size"] = 10
 
 BASE_DIR = Path(__file__).resolve().parent
 LLM_JSON_CANDIDATES = [
-    BASE_DIR / "risultati_es5.json",
+    BASE_DIR / "risultati_es4.json",
     BASE_DIR / "risultati_es5_Groq.json",
 ]
 ALL_COMMITS_JSON_CANDIDATES = [
-    BASE_DIR / "risultati_es5_tutti_commit_bash.json",
+    BASE_DIR / "risultati_es1_tutti_commit_bash.json",
+    BASE_DIR / "risultati_es2_tutti_commit_bash.json",
+    BASE_DIR / "risultati_es3_tutti_commit_bash.json",
     BASE_DIR / "risultati_es4_tutti_commit_bash.json",
+    BASE_DIR / "risultati_es5_tutti_commit_bash.json",
 ]
 
 FAILURE_CATEGORIES = [
@@ -114,6 +117,32 @@ print(json.dumps({{
     return json.loads(res.stdout)
 
 
+def compute_json_commit_stats(df: pd.DataFrame):
+    """Conta modifiche agli esercizi dal dataframe JSON."""
+    
+    # Assicura che le colonne necessarie esistano
+    ensure_column(df, 'student')
+    ensure_column(df, 'commit_analyzed')
+    ensure_column(df, 'exercise')
+    
+    # Modifiche agli esercizi: (student, exercise, commit_analyzed) distinti
+    exercise_mod_key = build_unique_series(df, ["student", "exercise", "commit_analyzed"])
+    total_modifications = exercise_mod_key.nunique()
+    
+    # Dettaglio per esercizio
+    modifications_per_exercise = {}
+    if 'exercise' in df.columns:
+        for exercise in df['exercise'].dropna().unique():
+            df_ex = df[df['exercise'] == exercise]
+            ex_key = build_unique_series(df_ex, ["student", "exercise", "commit_analyzed"])
+            modifications_per_exercise[str(exercise)] = ex_key.nunique()
+    
+    return {
+        'total_modifications': int(total_modifications),
+        'modifications_per_exercise': modifications_per_exercise,
+    }
+
+
 def si_no_to_bin(x):
     value = str(x).strip().upper()
     if value in {"YES", "Y", "TRUE", "T"}:
@@ -142,9 +171,13 @@ def build_unique_series(df: pd.DataFrame, columns):
 
 
 def add_percent_labels(ax, values, total):
+    ymin, ymax = ax.get_ylim()
+    offset = (ymax - ymin) * 0.03
     for i, value in enumerate(values):
         pct = (value / total) * 100 if total else 0
-        ax.text(i, value + 0.5, f"{pct:.1f}%", ha="center", fontweight="bold")
+        ax.text(i, value + offset, f"{pct:.1f}%", ha="center", fontweight="bold")
+    max_val = max(values) if len(values) > 0 else 0
+    ax.set_ylim(ymin, max_val + (ymax - ymin) * 0.18)
 
 
 def plot_category_counts(counts, total, title, colors, ylabel="Numero di Casi"):
@@ -156,6 +189,87 @@ def plot_category_counts(counts, total, title, colors, ylabel="Numero di Casi"):
     ax.tick_params(axis="x", rotation=45)
     add_percent_labels(ax, counts.values, total)
     plt.tight_layout()
+    plt.show()
+
+
+def load_all_exercises_data():
+    """Carica tutti i file JSON delle esercitazioni e restituisce dict con esercitazione -> dataframe."""
+    all_data = {}
+    
+    for candidate in ALL_COMMITS_JSON_CANDIDATES:
+        if candidate.exists():
+            ex_num = infer_exercise_number_from_filename(candidate)
+            if ex_num is not None:
+                print(f"Caricamento: {candidate.name}")
+                with open(candidate, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                df = pd.DataFrame(data)
+                ensure_column(df, "failure_category")
+                all_data[f"A{ex_num}"] = df
+                print(f"  Record caricati: {len(df)}\n")
+    
+    return all_data
+
+
+def plot_all_exercises_failure_distribution():
+    """Crea un grafico con la distribuzione delle failure categories per ogni esercitazione."""
+    all_data = load_all_exercises_data()
+    
+    if not all_data:
+        print("Nessun file JSON trovato per le esercitazioni")
+        return
+    
+    # Mapping dei titoli
+    exercise_titles = {
+        "A1": "Es.1 Semafori",
+        "A2": "Es.2 Monitor",
+        "A3": "Es.3 Threads",
+        "A4": "Es.4 Messaggi",
+        "A5": "Es.5 Server Multithread",
+    }
+    
+    # Crea i subplot
+    fig, axes = plt.subplots(1, len(all_data), figsize=(18, 5), sharey=True)
+    if len(all_data) == 1:
+        axes = [axes]
+    
+    colors = ["#d62728", "#ff7f0e", "#2ca02c", "#1f77b4", "#9467bd", "#8c564b", "#e377c2"]
+    
+    for idx, (ex_label, df) in enumerate(sorted(all_data.items())):
+        failure_counts = df["failure_category"].value_counts().reindex(FAILURE_CATEGORIES, fill_value=0)
+        
+        # Plot bar chart direttamente con ax.bar per avere piÃ¹ controllo
+        ax = axes[idx]
+        x_pos = range(len(failure_counts))
+        ax.bar(x_pos, failure_counts.values, color=colors[:len(failure_counts)])
+        
+        # Formattazione
+        title = exercise_titles.get(ex_label, ex_label)
+        ax.set_title(f"{title}", fontsize=12, fontweight="bold")
+        ax.set_ylabel("# Commits" if idx == 0 else "", fontsize=11)
+        ax.set_xlabel("")
+        ax.set_xticks([])  # Nascondi le etichette dell'asse x
+        ax.yaxis.set_major_locator(MultipleLocator(50))  # Tacche ogni 50 unitÃ 
+        ax.grid(axis="y", alpha=0.3)
+    
+    # Crea legenda manuale esterna
+    from matplotlib.patches import Patch
+    legend_elements = [
+        Patch(facecolor=colors[i], label=FAILURE_CATEGORIES[i].replace("_", " ").capitalize())
+        for i in range(len(FAILURE_CATEGORIES))
+    ]
+    fig.legend(
+        handles=legend_elements,
+        loc="upper left",
+        fontsize=10,
+        bbox_to_anchor=(0.83, 0.88),
+        bbox_transform=fig.transFigure,
+        borderaxespad=0,
+    )
+
+    fig.suptitle("Distribuzione delle Categorie di Fallimento per Esercitazione (Tutti i Commit)",
+                  fontsize=13, fontweight="bold")
+    plt.tight_layout(rect=[0, 0, 0.82, 0.93])
     plt.show()
 
 
@@ -189,15 +303,25 @@ df_all["git_commit_key"] = build_unique_series(df_all, ["student", "commit_analy
 df_all["exercise_mod_key"] = build_unique_series(df_all, ["student", "exercise", "commit_analyzed"])
 df_llm["llm_mod_key"] = build_unique_series(df_llm, ["student", "exercise", "commit_analyzed"])
 repo_stats = compute_repo_commit_stats(ALL_COMMITS_JSON_FILE)
+json_stats = compute_json_commit_stats(df_all)
 
 print("=" * 80)
+print("GRAFICO AGGREGATO: TUTTE LE ESERCITAZIONI")
+print("=" * 80)
+plot_all_exercises_failure_distribution()
+
+print("\n" + "=" * 80)
 print("CONTEGGI GLOBALI")
 print("=" * 80)
 print(f"Directory submissions usata per i conteggi git: {repo_stats['submissions_dir']}")
 print(f"Numero di studenti con almeno 1 commit: {repo_stats['students_with_commits']}")
-print(f"Numero totale di commit git: {repo_stats['total_git_commits']}")
-print(f"Numero totale di modifiche agli esercizi: {df_all['exercise_mod_key'].nunique()}")
+print(f"Numero totale di commit git (esercitazione): {repo_stats['total_git_commits']}")
+print(f"Numero totale di modifiche agli esercizi (dal JSON): {json_stats['total_modifications']}")
 print(f"Numero di modifiche analizzate tramite LLM: {df_llm['llm_mod_key'].nunique()}")
+
+print("\nDettaglio modifiche per esercizio (dal JSON):")
+for exercise, count in sorted(json_stats['modifications_per_exercise'].items()):
+    print(f"  {exercise}: {count} modifiche")
 
 print("\nTabella categorie di fallimento per esercizio:")
 failure_by_exercise = pd.crosstab(
@@ -273,12 +397,12 @@ if len(df_dynamic) > 0:
         (df_dynamic["llm_Output_Correct_bin"] == 0)
         & (df_dynamic["judge_Output_Correct_bin"] == 1),
         "output_category",
-    ] = "Output Corretto, Diagnosi giusta (LLM è corretto)"
+    ] = "Output Scorretto, Diagnosi giusta (LLM è corretto)"
 
     output_categories = [
         "Output Corretto (LLM è errato)",
         "Output Scorretto, Diagnosi sbagliata (LLM è errato)",
-        "Output Corretto, Diagnosi giusta (LLM è corretto)",
+        "Output Scorretto, Diagnosi giusta (LLM è corretto)",
     ]
     output_counts = df_dynamic["output_category"].value_counts().reindex(output_categories, fill_value=0)
     print("\nDistribuzione Output Analysis:")
@@ -294,7 +418,7 @@ if len(df_dynamic) > 0:
     )
 
     df_dynamic["code_category"] = pd.NA
-    df_dynamic.loc[df_dynamic["llm_Code_Correct_bin"] == 1, "code_category"] = "Codice valutato corretto (LLM è errato)"
+    df_dynamic.loc[df_dynamic["llm_Code_Correct_bin"] == 1, "code_category"] = "Codice Corretto (LLM è errato)"
     df_dynamic.loc[
         (df_dynamic["llm_Code_Correct_bin"] == 0)
         & (df_dynamic["judge_Code_Correct_bin"] == 0),
