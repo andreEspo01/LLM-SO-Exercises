@@ -1,0 +1,54 @@
+Soddisfa tutte queste mie richieste: 
+(\\wsl.localhost\Ubuntu\home\andre\Script-LLM-Esperimento1.0.py) se c'è un fallimento dinamico o di timeout, le regole di analisi statica posso non indicare la vera causa del problema. Le regole di analisi statica sono scritte presupponendo che l'esecuzione del programma vada correttamente. Possono segnalare un secondo problema nel programma, ma non quello che causa il fallimento.
+ 
+In casi come questo, anche lo LLM "primario" può segnalare un problema diverso da quello che causa il fallimento.
+ 
+approccio suggerito:
+- in caso di fallimento dinamico/timeout, non eseguiamo le regole statiche
+- per evitare lo stesso anche nello LLM (segnala un problema diverso da quello che ha causato il fallimento): non chiediamogli genericamente di trovare problemi nel codice, ma chiediamogli la causa nel codice per cui l'esecuzione non va, indicandogli la "llm_output_diagnosis". Lo LLM giudice si basa solo sul codice della ground truth, ma non su quello delle regole statiche.
+ 
+ 
+Sistema "C:\Users\andre\OneDrive\Desktop\TESI MAGISTRALE\Analisi-Risultati-Completo.py" riguardo i grafici in "output corretto", "scorretto, diagnosi sbagliata", "scorretto, diagnosi corretta": aggiungiamo tra parentesi una indicazione su se l'esito è un falso allarme o è un caso desiderato (lo hai fatto in alcune label dei grafici, lo puoi fare anche in altre), ad esempio:
+ 
+- Output valutato corretto (LLM è errato)
+- Output valutato scorretto, ma con diagnosi sbagliata (LLM è errato)
+- Output valutato scorretto, con diagnosi giusta (LLM è corretto)
+
+--------------------------------------------------------------------
+
+Sistema queste print in questi script:
+
+load balancing ("\\wsl.localhost\Ubuntu\home\andre\so_esercitazione_4_messaggi-main\load_balancing\.test\load-balancing.sh"):
+ 
+"Il balancer riceve un messaggio da un client che non ha effettuato alcun invio\n"
+ 
+"Un server riceve un messaggio da un client sconosciuto al balancer\n"
+ 
+--> in questi esercizi, il messaggio include il PID del processo client, la diagnosi può indicare che il balancer/server riceve un messaggio contenente un PID che non coincide con quello dei client
+ 
+
+
+server sincroni multipli("\\wsl.localhost\Ubuntu\home\andre\so_esercitazione_4_messaggi-main\server_sincroni_multipli\.test\server-sincroni-multipli.sh")
+ 
+"Il server riceve una request-to-send per un tipo di messaggio non richiesto da alcun client\n"
+ 
+--> meglio dire che il server ha ricevuto un messaggio in cui il campo tipo è errato e non coincide con il PID di un client
+ 
+ 
+"Il client riceve un ok-to-send con un tipo diverso da quello richiesto\n"
+ 
+"Il server riceve un messaggio con tipo o valore incoerente rispetto a quello inviato dal client\n";
+ 
+--> anche in questi casi, è meglio precisare nel messaggio che il campo tipo deve contenere il PID di un processo client, o un valore coerente con quello inviato dal client
+
+ 
+----------------------------------------------------------------------------------------------
+
+Sistema "C:\Users\andre\OneDrive\Desktop\TESI MAGISTRALE\Analisi-Risultati-Completo.py"): sfruttando sia il file dei risultati ottenuto con analisi LLM che quello che analizza tutti i commit, possiamo aggiungerli entrambi nello script, per effettuare questi conteggi:
+numero di studenti (che hanno fatto almeno 1 commit)
+numero totale di commit git
+numero totale di modifiche agli esercizi (cioè, conteggiando i singoli esercizi effettivamente modificati da un commit)
+numero di modifiche analizzate tramite LLM 
+ 
+puoi anche conteggiare le categorie di fallimento (crash, dynamic, etc.) separatamente per i singoli esercizi, sotto forma di tabella
+ 
