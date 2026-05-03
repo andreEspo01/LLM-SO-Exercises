@@ -15,11 +15,12 @@ import logging
 from pathlib import Path
 from datetime import datetime
 from openai import AzureOpenAI, OpenAI
+from collections import defaultdict, Counter
 
 # ================= CONFIG =================
 
-BASE_SUBMISSIONS_DIR = "/home/andre/esercitazione-5-server-multithread-submissions"
-GROUND_TRUTH_DIR = "/home/andre/ground_truth_es5"
+BASE_SUBMISSIONS_DIR = "/home/andre/esercitazione-1-semafori-submissions"
+GROUND_TRUTH_DIR = "/home/andre/ground_truth_es1"
 OLLAMA_URL = "http://localhost:11434/api/generate"
 
 # Provider selection: "groq", "azure", or "local"
@@ -59,17 +60,25 @@ else:
 COMPILE_TIMEOUT = 120
 TEST_TIMEOUT = 120
 BASH_ANALYSIS_TIMEOUT = 900
-BASH_ANALYSIS_SCRIPT = "/home/andre/Script-Bash-Only-Test-Es5.sh"
+BASH_ANALYSIS_SCRIPT = "/home/andre/Script-Bash-Only-Test-Es1.sh"
 COMMIT_SELECTION_WINDOW = 4
 
 LLM_CONNECT_TIMEOUT = 60
 LLM_READ_TIMEOUT = 2000
 
-OUTPUT_FILE = "risultati_es5.json"
+OUTPUT_FILE = "risultati_es1.json"
 LOG_SAMPLE_DIR = "experiment_logs"
 LLM_CACHE_FILE = "llm_cache.json"
 
 MAX_STUDENTS = None  # Per limitare il numero di studenti analizzati (None per tutti)
+
+# File JSON con tutti i commit (per selezione proporzionale)
+# Impostare a None per usare la selezione bash originale
+ALL_COMMITS_JSON_FILE = "/home/andre/risultati_es1_tutti_commit_bash.json"  # es. "/home/andre/risultati_es1_tutti_commit_bash.json"
+
+# Categorie per cui si fa solo analisi codice (no output LLM)
+# (non compaiono nei grafici di output)
+CODE_ONLY_CATEGORIES = {"timeout", "ipc_leak", "crash"}
 
 # ==========================================
 
@@ -584,7 +593,7 @@ def compile_exercise(path):
 
 # ================= INJECTION TESTS (COPIA NUOVI TEST) =================
 
-BASE_TESTS_DIR = Path("/home/andre/so_esercitazione_5_messaggi_threads")
+BASE_TESTS_DIR = Path("/home/andre/so_esercitazione_1_semafori-main")
 
 def inject_tests(student_dir, exercise_dir):
     """
@@ -1046,6 +1055,113 @@ def select_student_commit(student_dir, pending_exercises, correct_count, incorre
     fallback_results = [r for r in fallback_results if r.get("exercise") in pending_exercises]
     return fallback_commit, fallback_results
 
+
+def load_all_commits_data(all_commits_json_file):
+    """Carica il file JSON con tutti i commit."""
+    if not all_commits_json_file:
+        return []
+    p = Path(all_commits_json_file)
+    if not p.exists():
+        return []
+    with open(p, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def select_student_commit_proportional(student_name, all_commits_data,
+                                        pending_exercises, all_exercises,
+                                        correct_count, incorrect_count,
+                                        current_cat_counts=None):
+    """
+    Seleziona il commit ottimale per ogni esercizio dello studente,
+    minimizzando la distanza L1 dalla distribuzione target (proporzionale
+    a tutti_commit) su TUTTE le categorie.
+
+    IMPORTANTE: commit diversi possono essere usati per esercizi diversi
+    dello stesso studente. Questo permette una distribuzione proporzionale
+    anche quando la maggior parte degli studenti ha solo commit con
+    compile_failure su tutti gli esercizi contemporaneamente.
+
+    Parametri:
+    - current_cat_counts: Counter con la distribuzione corrente dei record
+      già selezionati. Aggiornato dal chiamante dopo ogni record salvato.
+
+    Ritorna: (None, [analysis_records]) dove analysis_records contiene
+             1 record per esercizio (potenzialmente da commit diversi).
+    """
+    # Filtra i record dello studente
+    student_records = [r for r in all_commits_data if r.get("student") == student_name]
+    if not student_records:
+        return None, []
+
+    # Distribuzione target: proporzionale a tutti_commit
+    global_cats = Counter(r["failure_category"] for r in all_commits_data)
+    total_global = sum(global_cats.values())
+    if total_global == 0:
+        return None, []
+    target_fractions = {cat: cnt / total_global for cat, cnt in global_cats.items()}
+
+    # Distribuzione corrente
+    if current_cat_counts is None:
+        current_cat_counts = Counter()
+        if correct_count > 0:
+            current_cat_counts["correct"] = correct_count
+        if incorrect_count > correct_count:
+            current_cat_counts["compile_failure"] = incorrect_count - correct_count
+
+    rare_cats = {"static_failure", "dynamic_failure", "timeout", "crash"}
+
+    # Per ogni esercizio pending, scegli il commit ottimale
+    # Raggruppa per (exercise, commit)
+    by_ex_commit = defaultdict(lambda: defaultdict(list))
+    for r in student_records:
+        by_ex_commit[r["exercise"]][r["commit_analyzed"]].append(r)
+
+    selected_records = []
+    running_counts = Counter(current_cat_counts)  # copia locale per simulazione
+
+    for exercise in pending_exercises:
+        commits_for_ex = by_ex_commit.get(exercise, {})
+        if not commits_for_ex:
+            continue
+
+        best_score = None
+        best_record = None
+
+        for commit, recs in commits_for_ex.items():
+            # Prendi il record per questo esercizio da questo commit
+            ex_recs = [r for r in recs if r.get("exercise") == exercise]
+            if not ex_recs:
+                continue
+            rec = ex_recs[0]
+            cat = rec.get("failure_category", "")
+
+            # Calcola distanza L1 dopo aver aggiunto questo record
+            new_counts = Counter(running_counts)
+            new_counts[cat] += 1
+            new_total = sum(new_counts.values())
+
+            all_cats_set = set(list(target_fractions.keys()) + list(new_counts.keys()))
+            l1_dist = sum(
+                abs(new_counts.get(c, 0) / new_total - target_fractions.get(c, 0))
+                for c in all_cats_set
+            )
+            rare_bonus = 1 if cat in rare_cats else 0
+            score = (-l1_dist, rare_bonus)
+
+            if best_score is None or score > best_score:
+                best_score = score
+                best_record = rec
+
+        if best_record:
+            selected_records.append(best_record)
+            running_counts[best_record["failure_category"]] += 1
+
+    if selected_records:
+        # Ritorna None come commit (non c'è un commit unico) e i record selezionati
+        return "MULTI_COMMIT", selected_records
+
+    return None, []
+
 # ================= LETTURA FILE =================
 
 def read_readme(path):
@@ -1410,8 +1526,7 @@ Rules:
 - If the output is empty, mark NO and state which interaction or phase is missing.
 - Do not use code-level causes.
 - Do not invent hidden requirements.
-- Be conservative: if a central operation is not independently verifiable from the trace, do not overclaim that the output is correct.
-- A YES answer requires direct visible support for the central externally observable result of the exercise, not just visible activity or eventual downstream consistency.
+- A YES answer requires that the visible trace is consistent with the exercise protocol. It does not require exhaustive verification of every value if the overall structure is coherent.
 
 Exercise description:
 {readme}
@@ -1421,65 +1536,34 @@ Program output:
 
 Decision rules:
 - If the output is empty, blank, or equivalent to "The program produced no output.", then Output_Correct = NO.
-- If the visible output contains "timeout" (or any equivalent timeout/termination message also at the end of output), then Output_Correct = NO, since the execution is considered incomplete or failed.
+- If the visible output contains "timeout" (or any equivalent timeout/termination message), then Output_Correct = NO.
 - Missing messages, wrong counts, malformed exchanges, mismatched IDs/PIDs/request numbers, impossible ordering, or wrong computed values visible in the output imply Output_Correct = NO.
-- Do not claim that counts, pairing, or ordering are correct unless the trace directly shows enough evidence to verify them.
-- When the description or visible trace implies a fixed number of requests, replies, iterations, produced values, consumed values, recipients, or termination events, verify those counts explicitly from the trace before answering YES.
-- If the trace shows repeated operations of the same family, check that the number of visible requests, replies, sends, receives, produces, consumes, reads, writes, or forwarded values is consistent with the visible protocol. If you cannot verify that consistency, prefer NO over YES.
-- Mere suspicion is not enough.
 - The diagnosis must describe the observable symptom only, not the possible code cause.
-- Use the visible order of events as the order of observation. Do not repair an apparently wrong trace by assuming hidden reordering, delayed flushing, or a different unseen temporal order unless the trace explicitly states that.
-- If the output is empty, explicitly state that no runtime trace is visible and mention the exercise-specific interaction that is missing, such as request/response, producer/consumer, sensor/collector, reader/writer, client/server, or another interaction named in the description.
-- For empty output, do not stop at "no output"; say which externally visible phase is missing, for example no client/server request-response trace, no producer/consumer exchange, no reader/writer activity, no worker/service interaction, or no completion/termination phase.
-- If the mismatch is about values, counts, ordering, or pairing, mention the concrete operation family involved.
-- If an operation name visibly encodes arithmetic or protocol meaning, such as SOMMA/sum, product, request, reply, consume, or produce, use that meaning when judging visible value or trace mismatches.
-- Do not reinterpret a client-visible field named `risultato` as a mere acknowledgment unless the trace explicitly labels it as ack/ok/status and not as an operation result.
-- Symmetrically, do not assume that a field named `risultato` must carry the produced payload or computed value unless that contract is explicit in the exercise description or visible trace.
-- In request/reply style traces, pair each visible reply with the immediately preceding request for the same actor when that pairing is visible.
-- When a request visibly carries operands, parameters, message ids, or payload values, check the corresponding visible reply or forwarded value against those exact visible inputs only when the exercise description or trace makes that value contract explicit.
+- Use the visible order of events as the order of observation.
+- In concurrent or multi-process traces, stdout interleaving by itself is not a protocol violation ONLY if each visible actor stream (per PID/role) is internally coherent and replies unambiguously reference their senders.
+- When actor identity is visible, evaluate counts and duplicates per actor/role/PID namespace, not by raw message numbers alone.
+- Do not infer a round-robin, routing, or balancing violation from interleaving alone UNLESS the visible reply identifiers explicitly show that messages were routed to wrong destinations.
 - If the trace gives enough information to validate values one by one, explicitly recompute those values before claiming a mismatch. Do not rely on intuition or operation names alone for arithmetic checks.
-- A later consume/receive/dequeue/read that reveals meaningful data does not by itself prove that an earlier produce/send/enqueue/store reply was wrong: many protocols legitimately return only success/error for side-effecting operations.
-- Treat an immediate reply value such as 0 as incorrect only when the trace or exercise explicitly requires a computed or payload value at that point, or when the reply concretely contradicts visible operands, ids, counts, or another explicit value expectation.
-- Operation names alone are not enough to infer the exact reply payload semantics, especially for side-effecting operations such as produce, send, store, enqueue, register, or submit.
-- Count the number of each operation family mentioned in the trace (requests, responses, produces, consumes, writes, reads, etc.). If counts appear inconsistent with the visible protocol or if the expected number of operation cycles cannot be verified, mark NO.
-- If the test feedback explicitly reports an incorrect execution or mismatch (e.g., "non è corretto", "numero... non corrisponde", "errore nel valore"), treat this as a strong signal that Output_Correct should be NO, even if the trace structure appears coherent.
-- SEMANTIC MISMATCH: In any protocol trace, mark NO only when an immediately returned result contradicts a value contract that is explicit in the description or visible trace. Do not derive the whole reply semantics from operation names alone.
-- If multiple client-visible replies return identical values, do not treat that as a defect by itself unless the trace explicitly shows those replies should differ or should carry per-request payloads.
-- If a client receives a result before the corresponding server-side or worker-side computation is visibly completed in the trace, do not assume correctness. This is a visible ordering violation; mark NO.
-- If the trace shows that meaningful computation results appear only in worker logs or downstream phases, but not in the immediate client-visible replies, do not treat the output as correct. The client-visible interaction is the authoritative observable behavior.
-- If the trace explicitly states that an operation's immediate reply must expose an arithmetic or payload result, and the visible reply does not match that requirement, mark NO even if the value appears later elsewhere.
-- If the ordering of phases (e.g., consumer actions appearing before producer actions) suggests missing initialization or implicit preloaded state that is not explicitly shown, do not assume correctness. Mark NO.
-- If the trace is compatible with both a correct and an incorrect execution due to missing or ambiguous evidence, prefer NO rather than YES.
-- If a central semantic property (e.g., correct RPC result, correct request/reply association, correct propagation of values) cannot be directly validated from the visible trace, do not mark the output as correct.
-- If client-visible results contradict semantics that are explicitly defined in the description or trace, prioritize that mismatch over later consistency in the trace and mark NO. Do not infer full reply semantics from operation names alone.
-- If the trace shows interleaving where requests and replies cannot be unambiguously paired based on visible ordering and values, treat this as a protocol violation and mark NO.
-- If a reply is observed with a value that is later produced or consumed by a different operation, do not retroactively validate the reply. Each reply must be correct at the time it is observed.
-- If the visible trace suggests that results are delivered through a different mechanism than the expected protocol, mark NO only when the description or trace explicitly requires the earlier phase to expose that result directly.
-- If the only apparent evidence for correctness comes from a later phase of the trace, prefer NO only when the earlier phase is explicitly required to expose the same result and does not do so.
-- If a later phase appears before an earlier prerequisite phase in the visible trace, and no explicit initialization, preload, warm-start, or prior state is shown, prefer NO rather than assuming an unseen valid setup.
-- If a server-side or worker-side log appears to compute the meaningful value only after a client has already received an incompatible reply, the output is still wrong from the client's point of view.
-- Do not treat later queue contents, consume results, dequeue results, or worker logs as proof that an earlier RPC reply was correct.
-- If the exercise shows one source stream being forwarded to multiple collectors/consumers, and the recipient traces show visibly different counts or duplicated/dropped values, mark NO.
-- In fan-out, broadcast, or multi-consumer traces, compare the visible recipient streams with each other and with the visible source stream. If one recipient misses a value, duplicates a value, starts from a shifted value, or ends with an extra value, mark NO.
-- When values are propagated across phases of the trace, verify that each visible downstream value is compatible with an earlier visible upstream value or operation result. If some exchanged values cannot be reconciled, mark NO.
-- Do not infer correct forwarding merely from collector/consumer logs when the central forwarding phase is missing, incomplete, or not coherently connected to the visible source stream.
-- If downstream recipients show data before the upstream source or central routing/processing phase is visibly established, do not infer a correct end-to-end trace from that ordering alone.
-- EXPLICIT OPERATION COUNTING RULE: In any request/response, producer/consumer, reader/writer, or client/server interaction, count the exact number of each operation type visible in the trace. If counts cannot be verified to be consistent with the protocol semantics (e.g., same number of requests and replies, matching producer and consumer pairs), mark NO with evidence.
-- FEEDBACK INTEGRATION: If the actual test output or feedback mentions any execution error (regardless of phrasing), treat this as a strong signal that Output_Correct should be NO, even if the trace structure appears internally sound. Do not dismiss test feedback as secondary evidence.
-- VALUE RECONCILIATION: For any operation that produces, retrieves, or transfers a value, verify coherence only against value flows that are explicit in the description or trace. Do not mark NO merely because a later operation reveals a value that an earlier side-effecting operation did not visibly return.
-- OPERATION FAMILY CONSISTENCY: Group operations by semantic family (request/reply pair, enqueue/dequeue pair, read/write pair, etc.). Within each family, the trace must show consistent pairing and value flow. If one family shows coherent behavior while related families show placeholder values or missing matches, mark NO.
-- If the trace shows interleaving where operations cannot be unambiguously associated back to their semantic intent based on visible identifiers, ordering, or values, treat this as a protocol violation and mark NO.
-- If multiple mismatches are visible, report the most central one first and optionally add one closely related consequence.
-- If the trace shows concurrent interleaving and some operations cannot be matched back to a coherent global trace, do not mark the output as correct.
-- If the trace does not directly validate a central semantic property of the interaction, avoid strong YES claims.
-- If the trace validates only a subset of the protocol and leaves the central request/reply result ambiguous, prefer NO over a confident YES.
-- Do not promote a merely plausible interpretation into YES when the same trace is also compatible with a broken request/reply, forwarding, routing, or completion behavior.
-- If correctness would require assuming hidden buffering, omitted trace segments, or an implicit acknowledgment protocol that is not named in the visible output, answer NO.
-- If correctness would require assuming hidden preloaded state, hidden earlier successful operations, or an unseen initial population of data structures that is not visible in the trace, answer NO.
-- A YES diagnosis is allowed only when the visible trace directly supports the central semantic result of the exercise, the visible counts are consistent with the protocol, and the visible values that can be checked are actually correct.
-- If Output_Correct = YES, the diagnosis must explicitly say that no concrete output mismatch is visible from the provided information.
-- Prefer diagnoses shaped like a test failure report: identify the broken interaction first, then state whether the problem is missing trace, wrong values, wrong counts, wrong pairing, wrong ordering, or a missing phase of the observable protocol.
-- Avoid generic formulas such as "the trace is missing" when a more specific statement is possible from the description and visible labels.
+- A later consume/receive/dequeue/read that reveals meaningful data does not by itself prove that an earlier produce/send/enqueue/store reply was wrong.
+- Count the number of each operation family mentioned in the trace. If counts appear inconsistent with the visible protocol, mark NO with evidence.
+- If the test feedback explicitly reports an incorrect execution or mismatch, treat this as a strong signal that Output_Correct should be NO.
+- CONCURRENT LOG ORDER: In concurrent or multi-process/multi-thread systems, a server or worker may print its log entry after the client has already received and printed the reply. This is normal and does not constitute an ordering violation. Evaluate protocol correctness based on the logical sequence of operations (request sent, reply received), not on the physical order of log lines in stdout.
+- DISPATCHER AUTHORITY: If a dispatcher, balancer, router, or aggregator log shows the correct distribution or forwarding of messages, accept that as evidence of correct routing. Do not require that the downstream recipients print their logs in the same order as the dispatcher's routing decisions.
+- SIDE-EFFECTING OPERATIONS: For operations that produce, enqueue, store, or register a value (e.g., PRODUCI, send, enqueue, register), a reply value of 0 or a neutral acknowledgment is correct unless the exercise description explicitly states that the immediate reply must carry the produced payload. The produced value appearing in a later consume/dequeue/read operation is the expected behavior.
+- PER-ACTOR COUNT TOLERANCE: In fan-out or broadcast scenarios where one source forwards to multiple consumers via a shared buffer or queue, individual consumers may receive slightly different counts due to scheduling. Do not mark NO solely because one consumer received one fewer value than another, unless the exercise explicitly requires each consumer to receive exactly the same count.
+- LOCAL SEQUENCE NUMBERS: A receiver or server may assign its own local sequence numbers (0, 1, 2, 3...) to messages it receives. These local numbers are independent of the original message numbers assigned by the sender. Do not treat a mismatch between a receiver's local sequence number and the sender's original message number as a protocol violation.
+- CONCURRENT MULTI-CLIENT REPLIES: When multiple clients send requests concurrently to the same server or registry, replies may arrive at each client in a different order than the requests were sent, due to scheduling. A reply is correct if it matches any pending request from that client, not necessarily the most recently sent one. Do not mark NO solely because a reply appears to match a different request than the immediately preceding one in the log.
+- IDENTICAL REPEATED REQUESTS: If a client sends multiple requests with the same operands or parameters, receiving identical replies is correct and expected. Do not treat repeated identical responses as a protocol violation or as evidence of missing randomness, unless the exercise description explicitly requires distinct values for each request.
+- LATE-STARTING CONSUMERS: In producer-consumer or fan-out scenarios, a consumer or collector that starts after the producer has already begun sending may miss the first few messages. This is a scheduling artifact, not a protocol error, unless the exercise explicitly requires all consumers to receive all messages from the beginning.
+- AGGREGATE COUNT VERIFICATION: When verifying message counts in a routing or distribution scenario, verify the total count across all senders and all receivers, not the per-actor count in isolation. For example, if 2 clients each send 6 messages to a balancer that distributes to 3 servers, each server correctly receives 4 messages (12 total / 3 servers = 4 each). Do not mark NO because each server receives fewer messages than each client sent; verify that the total sent equals the total received.
+- CONSUMA REPLY VALUE: In a producer-consumer RPC protocol, CONSUMA (consume) returns the value that was previously produced and stored in the buffer. The returned value is the stored payload, not a computed result. Do not mark NO because a CONSUMA reply returns a value that was produced by a previous PRODUCI call; this is the expected behavior. Only mark NO if the returned value does not match any previously produced value that should still be in the buffer.
+- SPOTCHECK: For at least one complete request/reply cycle or producer/consumer pair, verify that operands/inputs match outputs/results using concrete visible values. If you cannot spotcheck even one cycle, explain which values cannot be verified.
+- BALANCED JUDGMENT: If the trace shows the expected actors, the expected number of interactions, and at least one verifiable correct value exchange, mark YES even if not every single value can be independently verified. Do not require exhaustive verification when the overall structure is coherent.
+- If the trace is structurally complete (all expected phases present, all actors visible, counts match) and no concrete mismatch is found, mark YES.
+- If the trace is structurally complete but one specific value or pairing is concretely wrong, mark NO and identify that specific mismatch.
+- Do not mark NO merely because the trace is concurrent and some values cannot be independently attributed to specific actors, unless the exercise explicitly requires per-actor attribution.
+- If Output_Correct = YES, the diagnosis must explicitly say that no concrete output mismatch is visible and confirm that the trace structure is consistent with the exercise protocol.
+- If Output_Correct = NO, identify the specific broken interaction: missing trace, wrong values, wrong counts, wrong pairing, wrong ordering, or unverifiable value flows.
 - Keep the diagnosis detailed but compact: maximum of 100 words.
 - Write the diagnosis in English.
 - Do not quote or refer to hidden tests, hidden assertions, or hidden ground truth.
@@ -1500,7 +1584,8 @@ Runtime-failure focus:
 - The current output diagnosis is:
 {output_diagnosis or "No output diagnosis available."}
 - In this case, do NOT look for a generic bug or a secondary static issue.
-- Identify only the code cause that best explains why the execution failed in that specific way.
+- Identify ONLY the code cause that best explains why the execution failed in that specific way.
+- If output_diagnosis explicitly names a missing phase, wrong value, or protocol mismatch, prioritize finding the code statement that causes that specific symptom.
 - First verify that the reported runtime symptom is grounded in an explicit contract from the exercise or visible trace.
 - If the reported symptom depends on assuming that an immediate reply must carry a produced/computed payload, but that contract is not explicit, do not adopt that assumption as the target defect.
 - If the code only shows unrelated issues that do not explain that runtime failure, answer YES rather than inventing a different NO diagnosis.
@@ -1522,8 +1607,7 @@ Rules:
 - Mark NO only for a concrete defect directly supported by the code.
 - Preserve specialized policy names such as reader-writer or selective receive.
 - A visible omission can count as evidence if the relevant code path is shown.
-- If evidence is weak, answer YES.
-- If the provided runtime output looks coherent and no failing symptom is visible in the prompt, answer NO only for an explicit, undeniable code violation.
+- If evidence is weak and the observed output shows successful execution (complete protocol phases, no truncation), answer YES.
 - Do not invent hidden constraints.
 
 Exercise description:
@@ -1545,6 +1629,7 @@ Decision rules:
   * generic mutual exclusion is not the same as a reader-writer requirement
   * wrong parameter lifetime is not the same as missing free()
   * wrong message-type matching is not the same as a wrong payload value
+- CROSS-CHECK OUTPUT: If the provided program_output shows incomplete/missing/wrong protocol phases (e.g., missing EXIT messages, incomplete BIND handshakes, truncated request/reply pairs), treat this as evidence of a code cause UNLESS the exercise explicitly allows partial execution or early termination. Do not answer YES when the output itself signals failure.
 - Do not claim a race condition unless unsynchronized concurrent accesses to the same shared state are explicitly visible in the code.
 - Do not claim a missing pthread_join() unless the code can terminate before required work completes and no alternative waiting/synchronization is visible.
 - Do not claim a missing critical section unless both the concurrent access and the unprotected operation are visible.
@@ -1552,6 +1637,9 @@ Decision rules:
 - In reader-writer style code, if reader and writer procedures are already present, prefer diagnosing the wrong reader-writer policy or over-serialization of readers rather than claiming there is no synchronization at all.
 - Do not diagnose a reader-writer defect as a generic mutex defect unless the code clearly shows that only ordinary mutual exclusion was required.
 - Do not diagnose a queue-ID or selector mix-up merely because one variable stores or aliases another queue identifier; diagnose it only if the visible send/receive or type-selection sites are concretely inconsistent.
+- On a shared queue, mailbox, or channel used by multiple logical senders, receivers, or phases, check whether the visible selector/type/tag actually distinguishes the actors whose results are later attributed separately.
+- Reusing the same selector/type/tag for replies from different logical sources on the same shared channel is a concrete protocol-matching defect when the receiver later treats the received values as coming from specific roles, processes, phases, or operations.
+- Conversely, do not diagnose a shared-channel matching bug if the code visibly uses dedicated queues/channels or distinct selectors that already separate the logical sources.
 - Do not cite pseudocode labels, natural-language placeholders, or comments as code evidence unless they literally appear in the code.
 - Do not infer exercise-specific obligations unless they are explicit in the description or directly visible in the code.
 - Do not answer YES merely because one specific API name is absent. If the visible implementation of the relevant code path omits the required mechanism, selector, synchronization policy, cleanup step, or ownership pattern, that omission may itself justify NO.
@@ -1560,6 +1648,8 @@ Decision rules:
 - For dynamic_failure, timeout, ipc_leak, or crash, use the provided output diagnosis as the target symptom and explain the concrete code cause of that failure, not a different secondary issue that could exist even if execution succeeded.
 - For dynamic_failure, timeout, ipc_leak, or crash, do not use rule-style static findings or generic code smells as evidence unless they directly explain the observed runtime failure.
 - For dynamic_failure, timeout, ipc_leak, or crash, if the code does not show a concrete cause for the observed runtime symptom, prefer YES over diagnosing a different unrelated bug.
+- For dynamic_failure, timeout, ipc_leak, or crash, do not let a superficially coherent trace override a concrete main-path selector/routing ambiguity visible in the code.
+- If the main success path visibly multiplexes multiple logical sources through one shared queue/channel without a discriminator that matches the later role-specific attribution, that is concrete evidence for NO even when the runtime trace looks arithmetically coherent.
 - Only say that no concrete code is visible if the prompt genuinely does not contain line-numbered C source. When file blocks are shown, analyze those files instead of falling back to a visibility disclaimer.
 - When possible, explain both the violated code pattern and the concrete consequence on the protocol/runtime.
 - If Code_Correct = NO, the diagnosis must explicitly cite at least:
@@ -1611,6 +1701,7 @@ Code:
 Decision rules:
 - Start from YES, not from suspicion.
 - Mark NO only for one explicit correctness bug directly visible in the code.
+- CROSS-CHECK OUTPUT: If the provided program_output shows incomplete protocol phases, missing termination messages, truncated exchanges, or other structural problems (even if execution didn't hang), this may signal a code defect. Do not immediately default to YES if the output itself looks incomplete.
 - Do not speculate about hidden races, hidden deadlocks, hidden queue mix-ups, hidden lifetime bugs, or unobserved protocol failures.
 - If mutexes, semaphores, condition variables, monitor procedures, or reader/writer functions are visible, do not call the defect "missing synchronization primitives" unless the shown path truly contains no synchronization mechanism at all.
 - Do not diagnose a queue-ID or selector mix-up unless the visible send/receive or type-selection sites are concretely inconsistent.
@@ -1854,6 +1945,10 @@ Rules:
 - If the diagnosis cites a file, function, API, variable, or code fragment, it must be compatible with the diff.
 - Do not invent hidden defects outside the provided diff.
 - If the diff does not support the diagnosis, answer NO.
+- For timeout, crash, or ipc_leak failures: if no output diagnosis is available, evaluate the code diagnosis against the diff and feedback alone. Accept the diagnosis if it identifies a plausible mechanism (deadlock, missing cleanup, wrong synchronization) that is compatible with the observed failure category and visible in the diff. Do not require an output diagnosis to validate a code-level finding for these categories.
+- For timeout failures: accept diagnoses that identify blocking operations, missing signals, or deadlock-prone patterns visible in the diff, even without a specific output trace.
+- For ipc_leak failures: accept diagnoses that identify missing IPC resource deallocation visible in the diff.
+- For crash failures: accept diagnoses that identify null pointer dereference, invalid memory access, or uninitialized variable patterns visible in the diff.
 
 Final format only:
 Judge_Motivation: <short reason>
@@ -2384,7 +2479,7 @@ def save_sample(name, stdout, stderr, warnings, code, program_output=None):
 # ================= MAIN =================
 
 def extract_student_name(folder_name):
-    prefix = "esercitazione-5-server-multithread-"
+    prefix = "esercitazione-1-semafori-"
     if folder_name.startswith(prefix):
         return folder_name[len(prefix):]
     return folder_name
@@ -2434,6 +2529,8 @@ def main():
     correct_count = sum(1 for r in results if r.get("failure_category") == "correct")
     static_failure_count = sum(1 for r in results if r.get("failure_category") == "static_failure")
     incorrect_count = len(results) - correct_count
+    # Distribuzione corrente per selezione proporzionale multi-categoria
+    current_cat_counts = Counter(r.get("failure_category", "") for r in results)
 
     for i, student_dir in enumerate(student_dirs, start=1):
 
@@ -2464,18 +2561,43 @@ def main():
             continue
 
         log(f"    Selezione commit unico per studente...")
-        selected_commit, selected_analysis = select_student_commit(
-            student_dir,
-            delivered_exercises,
-            correct_count,
-            incorrect_count
-        )
+
+        # Selezione proporzionale se ALL_COMMITS_JSON_FILE è impostato
+        _all_commits_data = load_all_commits_data(ALL_COMMITS_JSON_FILE)
+        if _all_commits_data:
+            selected_commit, selected_analysis = select_student_commit_proportional(
+                student_name,
+                _all_commits_data,
+                delivered_exercises,
+                [d.name for d in BASE_TESTS_DIR.iterdir() if d.is_dir() and not d.name.startswith(".")],
+                correct_count,
+                incorrect_count,
+                current_cat_counts=current_cat_counts,
+            )
+            if not selected_commit:
+                log(f"    Nessun commit proporzionale trovato, uso selezione bash")
+                selected_commit, selected_analysis = select_student_commit(
+                    student_dir, delivered_exercises, correct_count, incorrect_count
+                )
+        else:
+            selected_commit, selected_analysis = select_student_commit(
+                student_dir,
+                delivered_exercises,
+                correct_count,
+                incorrect_count
+            )
+
         analysis_by_exercise = {
             item["exercise"]: item
             for item in selected_analysis
         }
 
-        if selected_commit == "HEAD":
+        if selected_commit == "MULTI_COMMIT":
+            # Selezione per-esercizio: i dati bash sono già nel selected_analysis
+            # Non serve checkout perché leggiamo il codice al momento dell'analisi
+            log(f"    Commit per-esercizio: "
+                f"{set(r['commit_analyzed'][:8] for r in selected_analysis)}")
+        elif selected_commit == "HEAD":
             checkout_head(student_dir)
         else:
             checkout_commit(student_dir, selected_commit)
@@ -2512,6 +2634,11 @@ def main():
             # =======================
             # ANALISI LLM
             # =======================
+            # Per MULTI_COMMIT: checkout del commit specifico per questo esercizio
+            if selected_commit == "MULTI_COMMIT" and analysis_record:
+                ex_commit = analysis_record.get("commit_analyzed", "")
+                if ex_commit:
+                    checkout_commit(student_dir, ex_commit)
             readme = read_readme(exercise_dir)
             code = read_student_code(exercise_dir)
             student_files = get_student_files(exercise_dir)
@@ -2593,23 +2720,27 @@ def main():
             # dynamic / crash / timeout / ipc è LLM + giudici normali
             elif failure in ["dynamic_failure", "crash", "timeout", "ipc_leak"]:
                 log(f"       Categoria: {failure.upper()}")
-                # ===== LLM =====
-                log(f"       [LLM] Analisi Output...")
-                resp_output = run_primary_output_analysis(readme, program_out)
-                log(f"       [LLM] Output:")
 
-                fields_output = parse_response(resp_output, ["Output_Correct", "Output_Diagnosis"])
+                # Per timeout/ipc_leak/crash: solo analisi codice (no output LLM)
+                # (non compaiono nei grafici di output)
+                if failure not in CODE_ONLY_CATEGORIES:
+                    # ===== LLM Output =====
+                    log(f"       [LLM] Analisi Output...")
+                    resp_output = run_primary_output_analysis(readme, program_out)
+                    log(f"       [LLM] Output:")
 
-                output_corr = fields_output.get("Output_Correct", "")
-                diag_output = fields_output.get("Output_Diagnosis", "")
-                    
-                if diag_output:
-                    diag_output = normalize_diagnosis(diag_output)
+                    fields_output = parse_response(resp_output, ["Output_Correct", "Output_Diagnosis"])
 
-                if diag_output:
-                    judge_out = judge_output_with_fallback(diag_output, failure, feedback_text)
-                    judge_out_ok = judge_out.get("Diagnosis_Correct", "")
-                    judge_out_motivation = judge_out.get("Judge_Motivation", "")
+                    output_corr = fields_output.get("Output_Correct", "")
+                    diag_output = fields_output.get("Output_Diagnosis", "")
+
+                    if diag_output:
+                        diag_output = normalize_diagnosis(diag_output)
+
+                    if diag_output:
+                        judge_out = judge_output_with_fallback(diag_output, failure, feedback_text)
+                        judge_out_ok = judge_out.get("Diagnosis_Correct", "")
+                        judge_out_motivation = judge_out.get("Judge_Motivation", "")
 
                 log(f"       [LLM] Analisi Codice...")
                 resp_code = run_primary_code_analysis(
@@ -2717,7 +2848,7 @@ def main():
             result = {
                     "student": student_name,
                     "exercise": exercise_dir.name,
-                    "commit_analyzed": selected_commit,
+                    "commit_analyzed": analysis_record.get("commit_analyzed", selected_commit) if selected_commit == "MULTI_COMMIT" else selected_commit,
                     "failure_category": failure,
                     "primary_model": "gpt-4o",
                     "judge_model": "gpt-4o",
@@ -2747,6 +2878,7 @@ def main():
                 incorrect_count += 1
             if failure == "static_failure":
                 static_failure_count += 1
+            current_cat_counts[failure] += 1
 
     log("FINISHED")
     print_token_costs()
@@ -2754,5 +2886,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 
