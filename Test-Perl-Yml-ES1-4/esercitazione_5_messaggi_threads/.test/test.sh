@@ -74,7 +74,15 @@ function compile_and_run() {
     IPC_BEFORE=$(ipcs | grep -c "0x")
  
   
-    timeout -v $TIMEOUT ./$BINARY > $OUTPUT 2>&1
+    if command -v unbuffer >/dev/null 2>&1
+    then
+        unbuffer timeout -v $TIMEOUT ./$BINARY > $OUTPUT 2>&1
+    elif command -v stdbuf >/dev/null 2>&1
+    then
+        stdbuf -oL -eL timeout -v $TIMEOUT ./$BINARY > $OUTPUT 2>&1
+    else
+        timeout -v $TIMEOUT ./$BINARY > $OUTPUT 2>&1
+    fi
  
     STATUS=$?
  
@@ -95,6 +103,8 @@ function compile_and_run() {
     fi
  
     cd - > /dev/null
+
+    validate_output "$OUTPUT"
  
     IPC_AFTER=$(ipcs | grep -c "0x")
  
@@ -103,6 +113,20 @@ function compile_and_run() {
         failure "È necessario deallocare le risorse IPC al termine della esecuzione"
     fi
 
+}
+
+
+function validate_output() {
+
+    OUTPUT=$1
+
+    if [ ! -f "$OUTPUT" ] || [ ! -s "$OUTPUT" ] || ! grep -q '[^[:space:]]' "$OUTPUT"; then
+        failure "L'esecuzione del programma non produce alcun output visibile"
+    fi
+
+    if grep -qi "errore\|error\|permission denied\|no such file\|operation not permitted" "$OUTPUT"; then
+        failure "Il programma contiene messaggi di errore di runtime"
+    fi
 }
 
 
@@ -224,4 +248,3 @@ export FEEDBACKFILE_PATH=/tmp/feedback.md
 export FEEDBACK=
 
 export SKIPPED=0
-

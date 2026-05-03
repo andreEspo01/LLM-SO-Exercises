@@ -15,12 +15,14 @@ compile_and_run $BINARY $OUTPUT $TIMEOUT
 
 
 perl -n -e '
-BEGIN { $counter=0; $coda1=0; $coda2=0; @produced=(); @consumed=(); }
+BEGIN { $counter=0; $coda1=0; $coda2=0; @produced=(); @consumed=(); $seen_wait=0; $seen_prod=0; $seen_cons=0; }
 if(/Produttore\stipo\s(\d)\saccede\sal\smonitor/) {
+    $seen_wait++;
     if($1 == 1) { $coda1++; }
     else { $coda2++; }
 }
 if(/Produttore\stipo\s(\d)\sha\sprodotto\s(\d+)/) {
+    $seen_prod++;
     push @produced, $2;
     if($1 == 1) { $coda1--; }
     else {
@@ -31,9 +33,12 @@ if(/Produttore\stipo\s(\d)\sha\sprodotto\s(\d+)/) {
         $coda2--;
     }
 }
-if(/Consumatore\sha\sconsumato\s(\d+)/) { push @consumed, $1; }
+if(/Consumatore\sha\sconsumato\s(\d+)/) { $seen_cons++; push @consumed, $1; }
 if($counter > 3 || $counter < 0) { print "Il numero di elementi nel buffer esce dai limiti consentiti [0,3]\n"; exit(1); }
 END {
+if(!$seen_wait || !$seen_prod || !$seen_cons) {
+    print "Il numero di valori prodotti non coincide con il numero di valori consumati\n"; exit(1);
+}
 if($#produced != $#consumed) { print "Il numero di valori prodotti non coincide con il numero di valori consumati\n"; exit(1); }
 for $i (0..$#produced) {
     if($produced[$i] != $consumed[$i]) {

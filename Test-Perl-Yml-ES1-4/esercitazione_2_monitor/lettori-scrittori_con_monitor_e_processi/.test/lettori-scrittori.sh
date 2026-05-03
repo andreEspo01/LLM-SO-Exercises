@@ -16,13 +16,38 @@ compile_and_run $BINARY $OUTPUT $TIMEOUT
 
 
 perl -n -e '
-BEGIN { $val1=0; $val2=0; $val3="no"; }
-if(/scrittura:\sTemperatura=(-?\d+),\sUmidit\S*=(\d+),\sPioggia=(\w+)/) { $val1=$1; $val2=$2; $val3=$3; }
-if(/lettura:\sTemperatura=(-?\d+),\sUmidit\S*=(\d+),\sPioggia=(\w+)/) {
-    if($1 != $val1 || $2 != $val2 || $3 ne $val3) {
-        print "La lettura delle informazioni meteo non restituisce l ultimo stato scritto nel monitor\n";
-        exit(1);
+BEGIN {
+    @writes = ("0|0|no");
+    %reader_states = ();
+}
+if(/scrittura:\sTemperatura=(-?\d+),\sUmidit\S*=(\d+),\sPioggia=(\w+)/) {
+    push @writes, join("|", $1, $2, $3);
+}
+if(/<(\d+)>\slettura:\sTemperatura=(-?\d+),\sUmidit\S*=(\d+),\sPioggia=(\w+)/) {
+    push @{$reader_states{$1}}, join("|", $2, $3, $4);
+}
+END {
+if(!keys %reader_states) {
+    print "La lettura delle informazioni meteo non restituisce l ultimo stato scritto nel monitor\n";
+    exit(1);
+}
+foreach $pid (keys %reader_states) {
+    my $cursor = 0;
+    foreach my $state (@{$reader_states{$pid}}) {
+        my $matched = 0;
+        for(my $i = $cursor; $i <= $#writes; $i++) {
+            if($writes[$i] eq $state) {
+                $cursor = $i;
+                $matched = 1;
+                last;
+            }
+        }
+        if(!$matched) {
+            print "La lettura delle informazioni meteo non restituisce l ultimo stato scritto nel monitor\n";
+            exit(1);
+        }
     }
+}
 }
 ' $OUTPUT >${ERROR_LOG}
 

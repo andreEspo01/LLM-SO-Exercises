@@ -42,7 +42,8 @@ format_semgrep_json() {
         printf "<i>" >> $OUTPUT_FILE
         jq -r ".results[$I].extra.message" $JSON >> $OUTPUT_FILE
         printf "</i>\n" >> $OUTPUT_FILE
-        printf "(codice errore: "$(jq -r ".results[$I].check_id" $JSON)")\n" >> $OUTPUT_FILE
+        printf "(codice errore: "$(jq -r ".results[$I].check_id" $JSON)")
+" >> $OUTPUT_FILE
         printf "\n\n\`\`\`\n" >> $OUTPUT_FILE
         jq -r ".results[$I].extra.lines" $JSON >> $OUTPUT_FILE
         printf "\n\`\`\`\n\n\n\n" >> $OUTPUT_FILE
@@ -74,24 +75,32 @@ function compile_and_run() {
     IPC_BEFORE=$(ipcs | grep -c "0x")
  
   
-    timeout -v $TIMEOUT ./$BINARY > $OUTPUT 2>&1
+    if command -v unbuffer >/dev/null 2>&1
+    then
+        unbuffer timeout -v $TIMEOUT ./$BINARY > $OUTPUT 2>&1
+    elif command -v stdbuf >/dev/null 2>&1
+    then
+        stdbuf -oL -eL timeout -v $TIMEOUT ./$BINARY > $OUTPUT 2>&1
+    else
+        timeout -v $TIMEOUT ./$BINARY > $OUTPUT 2>&1
+    fi
  
     STATUS=$?
  
     if [[ $STATUS != 0 ]];
     then
  
-	if [[ $STATUS == 139 ]];
-    	then
-		failure "L'esecuzione del programma è andata in crash"
-	else
-		if [[ $STATUS == 124 ]];
-		then
-			failure "L'esecuzione del programma è andata in timeout"
-		else
-			failure "L'esecuzione del programma è terminata con codice di ritorno non-nullo"
-		fi
-	fi
+        if [[ $STATUS == 139 ]];
+        then
+                failure "L'esecuzione del programma è andata in crash"
+        else
+                if [[ $STATUS == 124 ]];
+                then
+                        failure "L'esecuzione del programma è andata in timeout"
+                else
+                        failure "L'esecuzione del programma è terminata con codice di ritorno non-nullo"
+                fi
+        fi
     fi
  
     cd - > /dev/null
@@ -136,24 +145,24 @@ function static_analysis() {
 
         cd $SOURCEDIR
 
-		PREPROCESSOR=../.test/preprocessor.pl
+                PREPROCESSOR=../.test/preprocessor.pl
 
-		chmod +x "$PREPROCESSOR" 2>/dev/null
+                chmod +x "$PREPROCESSOR" 2>/dev/null
 
-		if ! "$PREPROCESSOR" "$PREPROCESSED" 2>/dev/null; then
-			if ! perl "$PREPROCESSOR" "$PREPROCESSED" 2>/dev/null; then
-				cd - > /dev/null
-				rm $PREPROCESSED
-				failure "Non e stato possibile pre-processare il file sorgente ($SOURCE)"
-			fi
-		fi
+                if ! "$PREPROCESSOR" "$PREPROCESSED" 2>/dev/null; then
+                        if ! perl "$PREPROCESSOR" "$PREPROCESSED" 2>/dev/null; then
+                                cd - > /dev/null
+                                rm $PREPROCESSED
+                                failure "Non e stato possibile pre-processare il file sorgente ($SOURCE)"
+                        fi
+                fi
 
 
 
         # Run semgrep
 
         env NO_COLOR=1 semgrep --error --quiet  --json --max-lines-per-finding 50 --config $CONFIG $PREPROCESSED -o $JSON_SEMGREP
-	
+
         if [ $? -ne 0 ]
         then
 
@@ -170,6 +179,20 @@ function static_analysis() {
     done
 }
 
+
+function validate_output() {
+
+    OUTPUT=$1
+
+    if [ ! -f "$OUTPUT" ] || [ ! -s "$OUTPUT" ] || ! grep -q '[^[:space:]]' "$OUTPUT"; then
+        failure "L'esecuzione del programma non produce alcun output visibile"
+    fi
+
+    # Controlla se l'output contiene messaggi di errore noti
+    if grep -qi "errore\|error\|permission denied\|no such file\|operation not permitted" "$OUTPUT"; then
+        failure "Il programma contiene messaggi di errore di runtime"
+    fi
+}
 
 
 function success() {
@@ -231,4 +254,3 @@ export FEEDBACKFILE_PATH=/tmp/feedback.md
 export FEEDBACK=
 
 export SKIPPED=0
-
