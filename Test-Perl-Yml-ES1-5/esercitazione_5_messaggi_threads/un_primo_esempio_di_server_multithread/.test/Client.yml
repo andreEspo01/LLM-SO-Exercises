@@ -1,0 +1,12 @@
+rules:
+  - id: receive-selettiva
+    languages: [c]
+    severity: ERROR 
+    message: "È richiesto che il client effettui una receive selettiva, utilizzando il PID nel campo tipo dei messaggi di risposta."
+    patterns:
+      - pattern: msgrcv(...);
+      - pattern-not: msgrcv(...,getpid(),...);
+      - pattern-not: |
+          $PID = getpid();
+          ...
+          msgrcv(...,$PID,...);

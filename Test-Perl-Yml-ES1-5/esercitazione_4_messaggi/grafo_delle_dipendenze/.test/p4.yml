@@ -1,0 +1,29 @@
+rules:
+  - id: queue_different_keys
+    languages: [c]
+    severity: ERROR
+    message: "Le code di messaggi devono essere create chiamando ftok() con parametri ogni volta diversi."
+    patterns:
+      - pattern: |
+          key_t $QUEUE1 = ftok(..., $M1);
+          ...
+          key_t $QUEUE2 = ftok(..., $M2);
+      - metavariable-pattern:
+          metavariable: $M1
+          patterns:
+            - pattern: $M2
+
+  - id: ftok_path
+    languages: [c]
+    severity: ERROR
+    message: "Il primo parametro di ftok() deve essere un percorso di un file o cartella nel sistema, che sia effettivamente esistente. Per garantire che il programma possa eseguire su un computer diverso da quello su cui è stato sviluppato, è raccomandado utilizzare il percorso relativo della cartella del programma, indicando “.”"
+    patterns:
+      - pattern: ftok($T1,...);
+      - metavariable-pattern:
+          metavariable: $T1
+          patterns:
+            - pattern-not: '"."'
+            - pattern-not-regex: './'
+    
+        
+

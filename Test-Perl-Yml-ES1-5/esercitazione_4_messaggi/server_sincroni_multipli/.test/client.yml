@@ -1,0 +1,26 @@
+rules:
+  - id: ftok_client
+    languages: [c]
+    severity: ERROR
+    message: "Il processo client deve utilizzare le stesse chiavi del processo server. Poichè questo esercizio utilizza eseguibili differenti per il client e per il server, è necessario utilizzare ftok()."
+    pattern-either:
+      - pattern: key_t ok_key = IPC_PRIVATE;
+      - pattern: key_t req_key = IPC_PRIVATE;
+      - pattern: msgget(IPC_PRIVATE,...);
+
+  - id: ftok_client_distinct_key
+    languages: [c]
+    severity: ERROR
+    message: "Le chiavi ok_key e req_key devono essere differenti. È quindi necessario usare parametri differenti nelle chiamate a ftok()."
+    patterns:
+      - pattern: |
+          key_t ok_key = ftok(... , $N1); 
+          ...
+          key_t req_key = ftok(... , $N2);
+      - metavariable-pattern:
+          metavariable: $N1
+          patterns:
+            - pattern: $N2
+
+
+      

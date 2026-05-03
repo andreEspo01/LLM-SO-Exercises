@@ -1,0 +1,20 @@
+rules:
+  - id: 01-missing-deallocation-rule
+    patterns:
+      - pattern: |
+          pthread_join(...);
+      - pattern-not-inside: |
+          ...
+          rimuovi_prod_cons(...);
+
+    message: In conclusione al programma è sempre buona norma deallocare le risorse
+      utilizzate dinamicamente
+    languages:
+      - c
+    severity: WARNING
+
+
+
+
+
+

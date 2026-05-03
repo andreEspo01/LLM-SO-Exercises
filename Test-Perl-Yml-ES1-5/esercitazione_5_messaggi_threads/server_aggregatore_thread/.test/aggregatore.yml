@@ -1,0 +1,19 @@
+rules:
+  - id: reader-writer
+    languages: [c]
+    severity: ERROR 
+    message: "È necessario che i lettori possano leggere contemporaneamente il dato condiviso. Si applichi qui l'algoritmo visto a lezione."
+    patterns:
+      - pattern: |
+          *valore = m->variabile;
+      - pattern-not-inside: |
+          pthread_mutex_lock(...);
+          ...
+          pthread_mutex_unlock(...);
+          ...
+          *valore = m->variabile;
+          ...
+          pthread_mutex_lock(...);
+          ...
+          pthread_mutex_unlock(...);          
+
