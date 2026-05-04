@@ -174,6 +174,19 @@ def si_no_to_bin(x):
     return pd.NA
 
 
+def bool_to_bin(x):
+    if pd.isna(x):
+        return 0
+    if isinstance(x, bool):
+        return int(x)
+    value = str(x).strip().upper()
+    if value in {"YES", "Y", "TRUE", "T", "1"}:
+        return 1
+    if value in {"NO", "N", "FALSE", "F", "0"}:
+        return 0
+    return 0
+
+
 def ensure_column(df: pd.DataFrame, column: str):
     if column not in df.columns:
         df[column] = pd.NA
@@ -334,6 +347,7 @@ def prepare_llm_dataframe(df_llm: pd.DataFrame):
         "student",
         "exercise",
         "commit_analyzed",
+        "test_success",
     ]:
         ensure_column(df_llm, column)
 
@@ -341,6 +355,8 @@ def prepare_llm_dataframe(df_llm: pd.DataFrame):
     df_llm["llm_Code_Correct_bin"] = df_llm["llm_Code_Correct"].apply(si_no_to_bin)
     df_llm["judge_Output_Correct_bin"] = df_llm["judge_Output_Correct"].apply(si_no_to_bin)
     df_llm["judge_Code_Correct_bin"] = df_llm["judge_Code_Correct"].apply(si_no_to_bin)
+    df_llm["gt_output_correct_bin"] = df_llm["test_success"].apply(bool_to_bin)
+    df_llm["gt_code_correct_bin"] = (df_llm["failure_category"] == "correct").astype(int)
     df_llm["llm_mod_key"] = build_unique_series(df_llm, ["student", "exercise", "commit_analyzed"])
 
 
@@ -350,6 +366,626 @@ def prepare_all_commits_dataframe(df_all: pd.DataFrame):
 
     df_all["git_commit_key"] = build_unique_series(df_all, ["student", "commit_analyzed"])
     df_all["exercise_mod_key"] = build_unique_series(df_all, ["student", "exercise", "commit_analyzed"])
+
+
+def accuracy_to_pct(correct_cases, total_cases):
+    if total_cases == 0:
+        return pd.NA
+    return (correct_cases / total_cases) * 100
+
+
+def format_pct(value):
+    if pd.isna(value):
+        return "N/A"
+    return f"{value:.1f}%"
+
+
+def format_accuracy_cell(correct_cases, total_cases):
+    if total_cases == 0:
+        return "N/A"
+    return f"{accuracy_to_pct(correct_cases, total_cases):.1f}% ({int(correct_cases)}/{int(total_cases)})"
+
+
+def compute_accuracy_summary(df, prediction_col, truth_col):
+    subset = df[df[prediction_col].notna()].copy()
+    if subset.empty:
+        return {"total_cases": 0, "correct_cases": 0, "accuracy_pct": pd.NA}
+
+    correct_mask = subset[prediction_col].astype("Int64") == subset[truth_col].astype("Int64")
+    correct_cases = int(correct_mask.sum())
+    total_cases = int(len(subset))
+    return {
+        "total_cases": total_cases,
+        "correct_cases": correct_cases,
+        "accuracy_pct": accuracy_to_pct(correct_cases, total_cases),
+    }
+
+
+def compute_group_accuracy_table(df, group_col, prediction_col, truth_col):
+    subset = df[df[prediction_col].notna()].copy()
+    if subset.empty:
+        return pd.DataFrame(columns=["total_cases", "correct_cases", "accuracy_pct"])
+
+    subset["metric_correct"] = (
+        subset[prediction_col].astype("Int64") == subset[truth_col].astype("Int64")
+    ).astype(int)
+    summary = subset.groupby(group_col, dropna=False)["metric_correct"].agg(
+        total_cases="size",
+        correct_cases="sum",
+    )
+    summary["accuracy_pct"] = summary.apply(
+        lambda row: accuracy_to_pct(row["correct_cases"], row["total_cases"]),
+        axis=1,
+    )
+    return summary.sort_index()
+
+
+def compute_diagnosis_summary(df, detection_col, judge_col, truth_col):
+    subset = df[
+        (df[truth_col] == 0)
+        & (df[detection_col] == 0)
+        & df[judge_col].notna()
+    ].copy()
+    if subset.empty:
+        return {"total_cases": 0, "correct_cases": 0, "accuracy_pct": pd.NA}
+
+    correct_mask = subset[judge_col].astype("Int64") == 1
+    correct_cases = int(correct_mask.sum())
+    total_cases = int(len(subset))
+    return {
+        "total_cases": total_cases,
+        "correct_cases": correct_cases,
+        "accuracy_pct": accuracy_to_pct(correct_cases, total_cases),
+    }
+
+
+def compute_group_diagnosis_table(df, group_col, detection_col, judge_col, truth_col):
+    subset = df[
+        (df[truth_col] == 0)
+        & (df[detection_col] == 0)
+        & df[judge_col].notna()
+    ].copy()
+    if subset.empty:
+        return pd.DataFrame(columns=["total_cases", "correct_cases", "accuracy_pct"])
+
+    subset["metric_correct"] = (subset[judge_col].astype("Int64") == 1).astype(int)
+    summary = subset.groupby(group_col, dropna=False)["metric_correct"].agg(
+        total_cases="size",
+        correct_cases="sum",
+    )
+    summary["accuracy_pct"] = summary.apply(
+        lambda row: accuracy_to_pct(row["correct_cases"], row["total_cases"]),
+        axis=1,
+    )
+    return summary.sort_index()
+
+
+# ==================== NEW METRIC FUNCTIONS ====================
+
+def compute_llm_output_correct_accuracy(df):
+    """
+    Statistica 1: LLM riesce a valutare correttamente se l'output è corretto?
+    Verifica: llm_Output_Correct == "YES" AND (failure_category == "static_failure" OR failure_category == "correct")
+    """
+    subset = df[df["llm_Output_Correct"].notna()].copy()
+    if subset.empty:
+        return {"total_cases": 0, "correct_cases": 0, "accuracy_pct": pd.NA}
+    
+    correct_mask = (subset["llm_Output_Correct"] == "YES") & (
+        (subset["failure_category"] == "static_failure") | (subset["failure_category"] == "correct")
+    )
+    correct_cases = int(correct_mask.sum())
+    total_cases = int(len(subset))
+    return {
+        "total_cases": total_cases,
+        "correct_cases": correct_cases,
+        "accuracy_pct": accuracy_to_pct(correct_cases, total_cases),
+    }
+
+
+def compute_llm_code_correct_accuracy(df):
+    """
+    Statistica 2: LLM riesce a valutare correttamente se il codice è corretto?
+    Verifica: llm_Code_Correct == "YES" AND failure_category == "correct"
+    """
+    subset = df[df["llm_Code_Correct"].notna()].copy()
+    if subset.empty:
+        return {"total_cases": 0, "correct_cases": 0, "accuracy_pct": pd.NA}
+    
+    correct_mask = (subset["llm_Code_Correct"] == "YES") & (subset["failure_category"] == "correct")
+    correct_cases = int(correct_mask.sum())
+    total_cases = int(len(subset))
+    return {
+        "total_cases": total_cases,
+        "correct_cases": correct_cases,
+        "accuracy_pct": accuracy_to_pct(correct_cases, total_cases),
+    }
+
+
+def compute_output_diagnosis_accuracy(df):
+    """
+    Statistica 3: Quando LLM rileva che l'output è errato, la diagnosi è corretta?
+    Filtro: failure_category == "dynamic_failure" AND llm_Output_Correct == "NO"
+    Verifica: judge_Output_Correct == "YES"
+    """
+    subset = df[
+        (df["failure_category"] == "dynamic_failure")
+        & (df["llm_Output_Correct"] == "NO")
+        & df["judge_Output_Correct"].notna()
+    ].copy()
+    if subset.empty:
+        return {"total_cases": 0, "correct_cases": 0, "accuracy_pct": pd.NA}
+    
+    correct_mask = subset["judge_Output_Correct"] == "YES"
+    correct_cases = int(correct_mask.sum())
+    total_cases = int(len(subset))
+    return {
+        "total_cases": total_cases,
+        "correct_cases": correct_cases,
+        "accuracy_pct": accuracy_to_pct(correct_cases, total_cases),
+    }
+
+
+def compute_code_diagnosis_accuracy(df):
+    """
+    Statistica 4: Quando LLM rileva che il codice è errato, la diagnosi è corretta?
+    Filtro: failure_category in ["dynamic_failure", "static_failure", "crash", "ipc_leak", "timeout"] AND llm_Code_Correct == "NO"
+    Verifica: judge_Code_Correct == "YES"
+    """
+    failure_types = ["dynamic_failure", "static_failure", "crash", "ipc_leak", "timeout"]
+    subset = df[
+        (df["failure_category"].isin(failure_types))
+        & (df["llm_Code_Correct"] == "NO")
+        & df["judge_Code_Correct"].notna()
+    ].copy()
+    if subset.empty:
+        return {"total_cases": 0, "correct_cases": 0, "accuracy_pct": pd.NA}
+    
+    correct_mask = subset["judge_Code_Correct"] == "YES"
+    correct_cases = int(correct_mask.sum())
+    total_cases = int(len(subset))
+    return {
+        "total_cases": total_cases,
+        "correct_cases": correct_cases,
+        "accuracy_pct": accuracy_to_pct(correct_cases, total_cases),
+    }
+
+
+def compute_llm_output_correct_per_group(df, group_col):
+    """Statistica 1 per gruppo - Solo failure_category in [static_failure, correct]"""
+    subset = df[
+        df["llm_Output_Correct"].notna() &
+        ((df["failure_category"] == "static_failure") | (df["failure_category"] == "correct"))
+    ].copy()
+    if subset.empty:
+        return pd.DataFrame(columns=["total_cases", "correct_cases", "accuracy_pct"])
+    
+    subset["metric_correct"] = subset["llm_Output_Correct"] == "YES"
+    summary = subset.groupby(group_col, dropna=False)["metric_correct"].agg(
+        total_cases="size",
+        correct_cases="sum",
+    )
+    summary["accuracy_pct"] = summary.apply(
+        lambda row: accuracy_to_pct(row["correct_cases"], row["total_cases"]),
+        axis=1,
+    )
+    return summary.sort_index()
+
+
+def compute_llm_code_correct_per_group(df, group_col):
+    """Statistica 2 per gruppo - Solo failure_category == correct"""
+    subset = df[
+        df["llm_Code_Correct"].notna() &
+        (df["failure_category"] == "correct")
+    ].copy()
+    if subset.empty:
+        return pd.DataFrame(columns=["total_cases", "correct_cases", "accuracy_pct"])
+    
+    subset["metric_correct"] = subset["llm_Code_Correct"] == "YES"
+    summary = subset.groupby(group_col, dropna=False)["metric_correct"].agg(
+        total_cases="size",
+        correct_cases="sum",
+    )
+    summary["accuracy_pct"] = summary.apply(
+        lambda row: accuracy_to_pct(row["correct_cases"], row["total_cases"]),
+        axis=1,
+    )
+    return summary.sort_index()
+
+
+def compute_output_diagnosis_per_group(df, group_col):
+    """Statistica 3 per gruppo"""
+    subset = df[
+        (df["failure_category"] == "dynamic_failure")
+        & (df["llm_Output_Correct"] == "NO")
+        & df["judge_Output_Correct"].notna()
+    ].copy()
+    if subset.empty:
+        return pd.DataFrame(columns=["total_cases", "correct_cases", "accuracy_pct"])
+    
+    subset["metric_correct"] = subset["judge_Output_Correct"] == "YES"
+    summary = subset.groupby(group_col, dropna=False)["metric_correct"].agg(
+        total_cases="size",
+        correct_cases="sum",
+    )
+    summary["accuracy_pct"] = summary.apply(
+        lambda row: accuracy_to_pct(row["correct_cases"], row["total_cases"]),
+        axis=1,
+    )
+    return summary.sort_index()
+
+
+def compute_code_diagnosis_per_group(df, group_col):
+    """Statistica 4 per gruppo"""
+    failure_types = ["dynamic_failure", "static_failure", "crash", "ipc_leak", "timeout"]
+    subset = df[
+        (df["failure_category"].isin(failure_types))
+        & (df["llm_Code_Correct"] == "NO")
+        & df["judge_Code_Correct"].notna()
+    ].copy()
+    if subset.empty:
+        return pd.DataFrame(columns=["total_cases", "correct_cases", "accuracy_pct"])
+    
+    subset["metric_correct"] = subset["judge_Code_Correct"] == "YES"
+    summary = subset.groupby(group_col, dropna=False)["metric_correct"].agg(
+        total_cases="size",
+        correct_cases="sum",
+    )
+    summary["accuracy_pct"] = summary.apply(
+        lambda row: accuracy_to_pct(row["correct_cases"], row["total_cases"]),
+        axis=1,
+    )
+    return summary.sort_index()
+
+
+def compute_metric_for_category(df, failure_cat, metric_type):
+    """
+    Calcola una metrica specifica per una categoria di fallimento.
+    metric_type: "output_eval", "code_eval", "output_diag", "code_diag"
+    """
+    df_cat = df[df["failure_category"] == failure_cat].copy()
+    if df_cat.empty:
+        return {"total_cases": 0, "correct_cases": 0, "accuracy_pct": pd.NA}
+    
+    if failure_cat == "correct":
+        if metric_type == "output_eval":
+            # LLM valuta correttamente se output è CORRETTO
+            subset = df_cat[df_cat["llm_Output_Correct"].notna()].copy()
+            correct_mask = subset["llm_Output_Correct"] == "YES"
+        elif metric_type == "code_eval":
+            # LLM valuta correttamente se codice è CORRETTO
+            subset = df_cat[df_cat["llm_Code_Correct"].notna()].copy()
+            correct_mask = subset["llm_Code_Correct"] == "YES"
+        elif metric_type == "output_diag":
+            # Quando LLM rileva correttamente che output è corretto, diagnosi giusta?
+            subset = df_cat[(df_cat["llm_Output_Correct"] == "YES") & df_cat["judge_Output_Correct"].notna()].copy()
+            correct_mask = subset["judge_Output_Correct"] == "YES"
+        elif metric_type == "code_diag":
+            # Quando LLM rileva correttamente che codice è corretto, diagnosi giusta?
+            subset = df_cat[(df_cat["llm_Code_Correct"] == "YES") & df_cat["judge_Code_Correct"].notna()].copy()
+            correct_mask = subset["judge_Code_Correct"] == "YES"
+    
+    elif failure_cat == "static_failure":
+        if metric_type == "output_eval":
+            # LLM valuta correttamente se output è SCORRETTO
+            subset = df_cat[df_cat["llm_Output_Correct"].notna()].copy()
+            correct_mask = subset["llm_Output_Correct"] == "NO"
+        elif metric_type == "code_eval":
+            # LLM valuta correttamente se codice è SCORRETTO
+            subset = df_cat[df_cat["llm_Code_Correct"].notna()].copy()
+            correct_mask = subset["llm_Code_Correct"] == "NO"
+        elif metric_type == "output_diag":
+            # Quando LLM rileva correttamente che output è CORRETTO, diagnosi giusta?
+            subset = df_cat[(df_cat["llm_Output_Correct"] == "YES") & df_cat["judge_Output_Correct"].notna()].copy()
+            correct_mask = subset["judge_Output_Correct"] == "YES"
+        elif metric_type == "code_diag":
+            # Quando LLM rileva correttamente che codice è scorretto, diagnosi giusta?
+            subset = df_cat[(df_cat["llm_Code_Correct"] == "NO") & df_cat["judge_Code_Correct"].notna()].copy()
+            correct_mask = subset["judge_Code_Correct"] == "YES"
+    
+    elif failure_cat == "dynamic_failure":
+        if metric_type == "output_eval":
+            # LLM valuta correttamente se output è SCORRETTO
+            subset = df_cat[df_cat["llm_Output_Correct"].notna()].copy()
+            correct_mask = subset["llm_Output_Correct"] == "NO"
+        elif metric_type == "code_eval":
+            # LLM valuta correttamente se codice è SCORRETTO
+            subset = df_cat[df_cat["llm_Code_Correct"].notna()].copy()
+            correct_mask = subset["llm_Code_Correct"] == "NO"
+        elif metric_type == "output_diag":
+            # Quando LLM rileva correttamente che output è scorretto, diagnosi giusta?
+            subset = df_cat[(df_cat["llm_Output_Correct"] == "NO") & df_cat["judge_Output_Correct"].notna()].copy()
+            correct_mask = subset["judge_Output_Correct"] == "YES"
+        elif metric_type == "code_diag":
+            # Quando LLM rileva correttamente che codice è scorretto, diagnosi giusta?
+            subset = df_cat[(df_cat["llm_Code_Correct"] == "NO") & df_cat["judge_Code_Correct"].notna()].copy()
+            correct_mask = subset["judge_Code_Correct"] == "YES"
+    
+    elif failure_cat in ["crash", "timeout", "ipc_leak"]:
+        if metric_type == "output_eval":
+            return {"total_cases": 0, "correct_cases": 0, "accuracy_pct": pd.NA}
+        elif metric_type == "code_eval":
+            # LLM valuta correttamente se codice è SCORRETTO
+            subset = df_cat[df_cat["llm_Code_Correct"].notna()].copy()
+            correct_mask = subset["llm_Code_Correct"] == "NO"
+        elif metric_type == "output_diag":
+            return {"total_cases": 0, "correct_cases": 0, "accuracy_pct": pd.NA}
+        elif metric_type == "code_diag":
+            # Quando LLM rileva correttamente che codice è scorretto, diagnosi giusta?
+            subset = df_cat[(df_cat["llm_Code_Correct"] == "NO") & df_cat["judge_Code_Correct"].notna()].copy()
+            correct_mask = subset["judge_Code_Correct"] == "YES"
+    
+    else:
+        return {"total_cases": 0, "correct_cases": 0, "accuracy_pct": pd.NA}
+    
+    if subset.empty:
+        return {"total_cases": 0, "correct_cases": 0, "accuracy_pct": pd.NA}
+    
+    correct_cases = int(correct_mask.sum())
+    total_cases = int(len(subset))
+    return {
+        "total_cases": total_cases,
+        "correct_cases": correct_cases,
+        "accuracy_pct": accuracy_to_pct(correct_cases, total_cases),
+    }
+
+
+def build_new_conclusion_tables(df, group_col):
+    """Costruisce tabelle di conclusione con le 4 nuove metriche per failure_category"""
+    failure_categories = [cat for cat in FAILURE_CATEGORIES if cat != "compile_failure"]
+    
+    if group_col == "failure_category":
+        # Tabella per failure_category: ogni riga è una categoria
+        formatted = pd.DataFrame(index=failure_categories)
+        
+        for metric_type, metric_name in [
+            ("output_eval", "Valutazione Output"),
+            ("code_eval", "Valutazione Codice"),
+            ("output_diag", "Diagnosi Output"),
+            ("code_diag", "Diagnosi Codice"),
+        ]:
+            results = []
+            for failure_cat in failure_categories:
+                summary = compute_metric_for_category(df, failure_cat, metric_type)
+                if summary["total_cases"] == 0:
+                    results.append("N/A")
+                else:
+                    results.append(format_accuracy_cell(summary["correct_cases"], summary["total_cases"]))
+            formatted[metric_name] = results
+        
+        return formatted, {}
+    
+    else:
+        # Tabella per esercizio: ogni riga è un esercizio, ma filtra per categoria rilevante
+        # Per ora manteniamo la logica originale se group_col != "failure_category"
+        metric_tables = {
+            "Valutazione Output": compute_llm_output_correct_per_group(df, group_col),
+            "Valutazione Codice": compute_llm_code_correct_per_group(df, group_col),
+            "Diagnosi Output": compute_output_diagnosis_per_group(df, group_col),
+            "Diagnosi Codice": compute_code_diagnosis_per_group(df, group_col),
+        }
+
+        row_labels = sorted({
+            label
+            for table in metric_tables.values()
+            for label in table.index.tolist()
+        })
+        if not row_labels:
+            return pd.DataFrame(), metric_tables
+
+        formatted = pd.DataFrame(index=row_labels)
+        for column_name, table in metric_tables.items():
+            formatted[column_name] = [
+                format_accuracy_cell(
+                    table.loc[label, "correct_cases"],
+                    table.loc[label, "total_cases"],
+                ) if label in table.index else "N/A"
+                for label in row_labels
+            ]
+        return formatted, metric_tables
+
+
+def build_conclusion_tables(df, group_col):
+    metric_tables = {
+        "Valutazione Output": compute_group_accuracy_table(
+            df,
+            group_col,
+            "llm_Output_Correct_bin",
+            "gt_output_correct_bin",
+        ),
+        "Valutazione Codice": compute_group_accuracy_table(
+            df,
+            group_col,
+            "llm_Code_Correct_bin",
+            "gt_code_correct_bin",
+        ),
+        "Diagnosi Output": compute_group_diagnosis_table(
+            df,
+            group_col,
+            "llm_Output_Correct_bin",
+            "judge_Output_Correct_bin",
+            "gt_output_correct_bin",
+        ),
+        "Diagnosi Codice": compute_group_diagnosis_table(
+            df,
+            group_col,
+            "llm_Code_Correct_bin",
+            "judge_Code_Correct_bin",
+            "gt_code_correct_bin",
+        ),
+    }
+
+    row_labels = sorted({
+        label
+        for table in metric_tables.values()
+        for label in table.index.tolist()
+    })
+    if not row_labels:
+        return pd.DataFrame(), metric_tables
+
+    formatted = pd.DataFrame(index=row_labels)
+    for column_name, table in metric_tables.items():
+        formatted[column_name] = [
+            format_accuracy_cell(
+                table.loc[label, "correct_cases"],
+                table.loc[label, "total_cases"],
+            ) if label in table.index else "N/A"
+            for label in row_labels
+        ]
+    return formatted, metric_tables
+
+
+def print_metric_summary_line(question, summary):
+    print(
+        f"- {question}: {format_pct(summary['accuracy_pct'])} "
+        f"({summary['correct_cases']}/{summary['total_cases']})"
+    )
+
+
+def print_accuracy_extremes(metric_name, table):
+    valid = table[table["total_cases"] > 0].copy()
+    if valid.empty:
+        print(f"  {metric_name}: nessun caso disponibile")
+        return
+
+    average_pct = valid["accuracy_pct"].mean()
+    best_row = valid.sort_values(
+        by=["accuracy_pct", "total_cases"],
+        ascending=[False, False],
+    ).iloc[0]
+    worst_row = valid.sort_values(
+        by=["accuracy_pct", "total_cases"],
+        ascending=[True, False],
+    ).iloc[0]
+    best_label = valid.sort_values(
+        by=["accuracy_pct", "total_cases"],
+        ascending=[False, False],
+    ).index[0]
+    worst_label = valid.sort_values(
+        by=["accuracy_pct", "total_cases"],
+        ascending=[True, False],
+    ).index[0]
+
+    print(f"  {metric_name} - media gruppi: {average_pct:.1f}%")
+    print(
+        f"  {metric_name} - migliore: {best_label} = "
+        f"{best_row['accuracy_pct']:.1f}% ({int(best_row['correct_cases'])}/{int(best_row['total_cases'])})"
+    )
+    print(
+        f"  {metric_name} - peggiore: {worst_label} = "
+        f"{worst_row['accuracy_pct']:.1f}% ({int(worst_row['correct_cases'])}/{int(worst_row['total_cases'])})"
+    )
+
+
+def print_conclusion_section(df_llm, exercise_title):
+    print("\n" + "=" * 80)
+    print("CONCLUSIONI LLM - METRICHE DI ACCURATEZZA")
+    print("=" * 80)
+    print(f"Esercitazione: {exercise_title}")
+    print("\nMetriche calcolate:")
+    print("  1. Output: llm_Output_Correct='YES' AND (failure_category='static_failure' OR 'correct')")
+    print("  2. Codice: llm_Code_Correct='YES' AND failure_category='correct'")
+    print("  3. Diagnosi Output: quando llm_Output_Correct='NO', judge_Output_Correct='YES'")
+    print("  4. Diagnosi Codice: quando llm_Code_Correct='NO', judge_Code_Correct='YES'")
+
+    output_eval_summary = compute_llm_output_correct_accuracy(df_llm)
+    code_eval_summary = compute_llm_code_correct_accuracy(df_llm)
+    output_diag_summary = compute_output_diagnosis_accuracy(df_llm)
+    code_diag_summary = compute_code_diagnosis_accuracy(df_llm)
+
+    print("\n--- Metriche Globali ---")
+    print_metric_summary_line(
+        "1. LLM valuta correttamente se l'output e' corretto",
+        output_eval_summary,
+    )
+    print_metric_summary_line(
+        "2. LLM valuta correttamente se il codice e' corretto",
+        code_eval_summary,
+    )
+    print_metric_summary_line(
+        "3. Quando LLM rileva output errato, la diagnosi e' corretta",
+        output_diag_summary,
+    )
+    print_metric_summary_line(
+        "4. Quando LLM rileva codice errato, la diagnosi e' corretta",
+        code_diag_summary,
+    )
+
+    failure_table, failure_metric_tables = build_new_conclusion_tables(df_llm, "failure_category")
+    if not failure_table.empty:
+        print("\n--- Accuratezza per failure_category ---")
+        print(failure_table.to_string())
+
+    exercise_table, exercise_metric_tables = build_new_conclusion_tables(df_llm, "exercise")
+    if not exercise_table.empty:
+        print("\n--- Accuratezza per esercizio specifico ---")
+        print(exercise_table.to_string())
+
+    print("\n--- Statistiche dettagliate per failure_category ---")
+    for metric_name, metric_table in failure_metric_tables.items():
+        print(f"\n{metric_name}:")
+        print_accuracy_extremes(metric_name, metric_table)
+
+    print("\n--- Statistiche dettagliate per esercizio specifico ---")
+    for metric_name, metric_table in exercise_metric_tables.items():
+        print(f"\n{metric_name}:")
+        print_accuracy_extremes(metric_name, metric_table)
+
+
+def print_overall_conclusion_section(df_llm_all):
+    print("\n" + "=" * 80)
+    print("CONCLUSIONI GLOBALI LLM - METRICHE DI ACCURATEZZA")
+    print("=" * 80)
+    print("\nMetriche calcolate:")
+    print("  1. Output: llm_Output_Correct='YES' AND (failure_category='static_failure' OR 'correct')")
+    print("  2. Codice: llm_Code_Correct='YES' AND failure_category='correct'")
+    print("  3. Diagnosi Output: quando llm_Output_Correct='NO', judge_Output_Correct='YES'")
+    print("  4. Diagnosi Codice: quando llm_Code_Correct='NO', judge_Code_Correct='YES'")
+
+    output_eval_summary = compute_llm_output_correct_accuracy(df_llm_all)
+    code_eval_summary = compute_llm_code_correct_accuracy(df_llm_all)
+    output_diag_summary = compute_output_diagnosis_accuracy(df_llm_all)
+    code_diag_summary = compute_code_diagnosis_accuracy(df_llm_all)
+
+    print("\n--- Metriche Globali Complessive ---")
+    print_metric_summary_line(
+        "1. LLM valuta correttamente se l'output e' corretto (media globale)",
+        output_eval_summary,
+    )
+    print_metric_summary_line(
+        "2. LLM valuta correttamente se il codice e' corretto (media globale)",
+        code_eval_summary,
+    )
+    print_metric_summary_line(
+        "3. Quando LLM rileva output errato, la diagnosi e' corretta (media globale)",
+        output_diag_summary,
+    )
+    print_metric_summary_line(
+        "4. Quando LLM rileva codice errato, la diagnosi e' corretta (media globale)",
+        code_diag_summary,
+    )
+
+    df_llm_all["exercise_type"] = df_llm_all["exercise_number"].map(EXERCISE_TITLES)
+
+    failure_table, failure_metric_tables = build_new_conclusion_tables(df_llm_all, "failure_category")
+    if not failure_table.empty:
+        print("\n--- Accuratezza globale per failure_category ---")
+        print(failure_table.to_string())
+
+    exercise_type_table, exercise_type_metric_tables = build_new_conclusion_tables(df_llm_all, "exercise_type")
+    if not exercise_type_table.empty:
+        print("\n--- Accuratezza globale per tipologia di esercitazione ---")
+        print(exercise_type_table.to_string())
+
+    print("\n--- Statistiche dettagliate globali per failure_category ---")
+    for metric_name, metric_table in failure_metric_tables.items():
+        print(f"\n{metric_name}:")
+        print_accuracy_extremes(metric_name, metric_table)
+
+    print("\n--- Statistiche dettagliate globali per tipologia di esercitazione ---")
+    for metric_name, metric_table in exercise_type_metric_tables.items():
+        print(f"\n{metric_name}:")
+        print_accuracy_extremes(metric_name, metric_table)
 
 
 def print_global_stats(exercise_title, repo_stats, json_stats, df_llm, df_all):
@@ -649,6 +1285,7 @@ def analyze_exercise(exercise_number: int, llm_json_file: Path, all_commits_json
     print_global_stats(exercise_title, repo_stats, json_stats, df_llm, df_all)
     plot_all_commits_distribution(df_all, exercise_title, exercise_number)
     plot_llm_failure_distribution(df_llm, exercise_title, exercise_number)
+    print_conclusion_section(df_llm, exercise_title)
     analyze_dynamic_failure(df_llm, exercise_title, exercise_number)
     analyze_static_failure(df_llm, exercise_title, exercise_number)
     analyze_correct_cases(df_llm, exercise_title, exercise_number)
@@ -662,6 +1299,7 @@ def analyze_exercise(exercise_number: int, llm_json_file: Path, all_commits_json
     print(f"Totale valutazioni LLM: {len(df_llm)}")
     print(f"Totale record tutti i commit: {len(df_all)}")
     print("\nAnalisi completata!")
+    return df_llm
 
 
 def main():
@@ -681,6 +1319,7 @@ def main():
     if not exercise_numbers:
         raise FileNotFoundError("Nessun file JSON trovato nelle liste LLM_JSON_CANDIDATES e ALL_COMMITS_JSON_CANDIDATES")
 
+    all_llm_frames = []
     for exercise_number in exercise_numbers:
         llm_json_file = llm_map.get(exercise_number)
         all_commits_json_file = all_commits_map.get(exercise_number)
@@ -693,7 +1332,13 @@ def main():
             print("!" * 80)
             continue
 
-        analyze_exercise(exercise_number, llm_json_file, all_commits_json_file)
+        analyzed_df = analyze_exercise(exercise_number, llm_json_file, all_commits_json_file)
+        analyzed_df = analyzed_df.copy()
+        analyzed_df["exercise_number"] = exercise_number
+        all_llm_frames.append(analyzed_df)
+
+    if all_llm_frames:
+        print_overall_conclusion_section(pd.concat(all_llm_frames, ignore_index=True))
 
 if __name__ == "__main__":
     main()
