@@ -1,0 +1,6 @@
+exercise_number,exercise_title,total_category_hits,buffer overflows,integer overflows,format strings,memory management,command injection,race conditions,privilege management,denial of service,miscellaneous
+1,Es.1 Semafori,116,1.7241379310344827,0.0,0.0,0.0,0.0,0.0,0.0,0.0,98.27586206896551
+2,Es.2 Monitor,20,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,100.0
+3,Es.3 Threads,725,0.13793103448275862,0.0,1.103448275862069,98.48275862068967,0.0,0.0,0.0,0.0,0.27586206896551724
+4,Es.4 Messaggi,63,3.1746031746031744,11.11111111111111,19.047619047619047,23.809523809523807,0.0,0.0,0.0,0.0,42.857142857142854
+5,Es.5 Server Multithread,678,0.0,0.0,0.0,98.08259587020649,0.0,0.0,0.0,0.0,1.9174041297935103

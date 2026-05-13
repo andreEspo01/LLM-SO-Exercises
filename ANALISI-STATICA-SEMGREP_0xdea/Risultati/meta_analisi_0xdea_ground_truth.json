@@ -1,0 +1,20 @@
+{
+  "rules_repo": "/home/andre/.cache/tesi-static-rules/0xdea-semgrep-rules",
+  "rules_config": "/home/andre/.cache/tesi-static-rules/0xdea-semgrep-rules/rules/c",
+  "output_dir": "/home/andre/analisi_0xdea_ground_truth",
+  "chart_path": "/home/andre/analisi_0xdea_ground_truth/grafico_0xdea_commit_oltre_ground_truth.pdf",
+  "percentage_chart_path": "/home/andre/analisi_0xdea_ground_truth/grafico_0xdea_commit_oltre_ground_truth_percentuale.pdf",
+  "normalized_percentage_chart_path": "/home/andre/analisi_0xdea_ground_truth/grafico_0xdea_commit_oltre_ground_truth_percentuale_normalizzata.pdf",
+  "overlap_chart_path": "/home/andre/analisi_0xdea_ground_truth/grafico_overlap_semgrep_vs_custom_correct_static_failure_percentuale.pdf",
+  "categories": [
+    "buffer overflows",
+    "integer overflows",
+    "format strings",
+    "memory management",
+    "command injection",
+    "race conditions",
+    "privilege management",
+    "denial of service",
+    "miscellaneous"
+  ]
+}

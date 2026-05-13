@@ -1,0 +1,6 @@
+exercise_number,exercise_title,buffer overflows,integer overflows,format strings,memory management,command injection,race conditions,privilege management,denial of service,miscellaneous
+1,Es.1 Semafori,2,0,0,0,0,0,0,0,114
+2,Es.2 Monitor,0,0,0,0,0,0,0,0,20
+3,Es.3 Threads,1,0,8,714,0,0,0,0,2
+4,Es.4 Messaggi,2,7,12,15,0,0,0,0,27
+5,Es.5 Server Multithread,0,0,0,665,0,0,0,0,13
