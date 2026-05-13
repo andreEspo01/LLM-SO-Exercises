@@ -14,9 +14,8 @@ Lo sviluppo di programmi concorrenti richiede attenzione a problematiche comples
 
 I test dinamici tradizionali non sempre rilevano errori dovuti a interleaving non deterministico o protocolli complessi. L'analisi statica con **Semgrep**, tramite regole personalizzate, consente di individuare errori strutturali nel codice.
 
-### Pipeline originale
+### Pipeline di analisi
 
-![Pipeline Articolo](DIAGRAMMI/Pipeline-Articolo.png)  
 ![Pipeline Analisi](DIAGRAMMI/Pipeline-Analisi.png)
 
 ---
@@ -49,29 +48,6 @@ La pipeline combinata è composta da:
 - **Prompt Engineering:** template per LLM primario e giudice, con regole dettagliate per diagnosi accurate  
 - **Categorie di fallimento:** `compile failure`, `crash`, `timeout`, `IPC leak`, `dynamic failure`, `static failure`, `correct`  
 - **Validazione:** LLM giudice verifica coerenza diagnosi con output dei test e codice corretto  
-
----
-
-## Esperimento 1.0 (Threads)
-
-1. Input al modello:
-   - Traccia dell’esercizio
-   - Codice dello studente  
-2. Esecuzione del codice → generazione output  
-3. Analisi LLM primario:
-   - Verifica correttezza output  
-   - Diagnosi testuale del problema  
-   - Identificazione punto del codice dove si verifica l’errore  
-4. Validazione LLM giudice:
-   - Confronto output con feedback dei test dinamici  
-   - Confronto codice con soluzione corretta  
-5. Output finale strutturato:
-   - **Esecuzione corretta (output)**: YES/NO  
-   - **Codice corretto (code)**: YES/NO  
-   - Diagnosi dettagliata e motivazione  
-
-![Esempio Analisi LLM](DIAGRAMMI/llm_analysis_example.png)
-
 ---
 
 ## Risultati
