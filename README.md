@@ -44,7 +44,7 @@ La pipeline combinata è composta da:
 ## Metodologia
 
 - **Dataset:** repository degli studenti per 5 esercitazioni: semafori, monitor, threads, messaggi, server multithread  
-- **Strumenti:** Python, Bash, WSL, Semgrep, Groq, Azure OpenAI GPT-4o  
+- **Strumenti:** Python, Bash, WSL, Semgrep, Groq, Azure OpenAI GPT-4o, GPT-OSS-20b  
 - **Prompt Engineering:** template per LLM primario e giudice, con regole dettagliate per diagnosi accurate  
 - **Categorie di fallimento:** `compile failure`, `crash`, `timeout`, `IPC leak`, `dynamic failure`, `static failure`, `correct`  
 - **Validazione:** LLM giudice verifica coerenza diagnosi con output dei test e codice corretto  
