@@ -86,7 +86,7 @@ export AZURE_OPENAI_MODEL_DEPLOYMENT="gpt-4o"
 
 ### Script LLM con VPN — `Script-LLM-Esperimento1.0-v2-with_VPN.py`
 
-Versione estesa usata per l'esercitazione 5, con supporto aggiuntivo per un modello remoto (`gpt-oss-20b`) accessibile tramite VPN (FortiClient). Aggiunge:
+Versione estesa, con supporto aggiuntivo per un modello remoto (`gpt-oss-20b`) accessibile tramite VPN (FortiClient). Aggiunge:
 
 - Provider `remote-gpt`: client OpenAI-compatibile puntato su endpoint privato via VPN
 - Parallelizzazione delle richieste con semafori separati per modello primario e giudice (`REMOTE_GPT_PRIMARY_PARALLEL_REQUESTS`, `REMOTE_GPT_JUDGE_PARALLEL_REQUESTS`)
@@ -94,7 +94,7 @@ Versione estesa usata per l'esercitazione 5, con supporto aggiuntivo per un mode
 
 ```bash
 export LLM_PROVIDER=remote-gpt
-export REMOTE_GPT_ENDPOINT="http://192.168.100.7:8888"
+export REMOTE_GPT_ENDPOINT="http://X.X.X.X:YYYY"
 export REMOTE_GPT_MODEL="gpt-oss-20b"
 ```
 
