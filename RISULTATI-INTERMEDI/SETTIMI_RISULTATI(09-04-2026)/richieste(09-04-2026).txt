@@ -1,0 +1,12 @@
+C'è una regola di analisi statica (allocazione dei parametri thread non sullo heap) che dà dei falsi allarmi (non è la vera causa dei malfunzionamenti), si può rimuovere questa regola
+ 
+La regola sulla errata posizione di free() potrebbe non funzionare correttamente (nell'esempio che abbiamo visto non solleva nessun avvertimento) -> da debuggare
+ 
+per gli esercizi corretti, meglio non dare al giudice tutto l'output grezzo (ci sono anche informazioni sui check statici). Si può chiedere al giudice semplicemente se "la diagnosi sullo output dice che l'esecuzione è corretta?"
+ 
+Qualche regola statica non indica una linea/funzione precisa (esempio del lettore/scrittore che non viene applicato). Si può dire al giudice che, se la ground truth non è dettagliata, che non è un errore se il primario fornisce più dettagli rispetto alla ground truth.
+ 
+Per avere un giudice più accurato, si può chiedere al giudice anche di produrre in output una motivazione o dei riferimenti (per ridurre gli errori). La risposta booleana SI/NO la si fa apparire dopo la motivazione.
+ 
+ 
+ci scrivi qui se, provando queste cose, si riescono ad evitare gli "errori" del giudice che ci hai fatto vedere?

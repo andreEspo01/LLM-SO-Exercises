@@ -1,0 +1,23 @@
+rilevazione ipc_leak, timeout, crash -> invece di basarsi su keyword, utilizzare lo script bash per rilevare se si è verificato uno di questi casi
+ 
+ 
+esempio dynamic - diagnosi llm primario è errata, ma è ok per il giudice
+ 
+--> provare a dire al giudice la diagnosi del primario deve contenere esplicitamente quello che è riportato nella diagnosi "ground truth"
+ 
+ 
+esempio static - valutazione llm primario è quasi corretta, ma non del tutto (dice che c'è un leak, invece è un errato passaggio dei parametri)
+ 
+--> provare a rimarcare nel prompt al giudice che la soluzione che gli diamo è corretta e priva di errori
+ 
+--> la diagnosi del primario deve contenere esplicitamente il problema riportato dal warning
+ 
+--> la diagnosi del primario non deve contenere info superflue (uso di free etc.)
+ 
+--> altre soluzioni di ottimizzazione dei prompt:
+- far precedere alla risposta si/no una struttura "action/reasoning/..."
+ 
+ 
+per verificare la qualità del prompt, si può "copiare" il prompt generato dallo script in ChatGPT oppure Claude
+ 
+si può anche chiedere a ChatGTP di ottimizzare il prompt

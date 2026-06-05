@@ -1,0 +1,14 @@
+usare l'ultima versione del codice dei test (copiandoli nel repo studente, prima di lanciare)
+ 
+chiedere a llm primario diagnosi più precisa (variabili o chiamate a funzione o pezzi di codice coinvolti nel problema)
+ 
+chiedere a llm giudice di valutare in modo più preciso (cioè se le variabili/chiamate della diagnosi primaria sono somiglianti a quelle della vera diagnosi, o se la diagnosi primaria fa riferimento alle differenze tra codice studente e codice corretto)
+ 
+usare 5 categorie di fallimento senza ambiguità (crash, timeout, ipc leak, dynamic failure, static failure)
+ 
+verificare a campione se llm giudice funziona bene
+ 
+valutare altro modello "non coder" per il giudice
+
+iniziare ad analizzare gli script perl delle altre esercitazioni, purtroppo quegli script non includono una stampa dei messaggi di diagnosi, inizia a guardarli e possiamo discutere anche di quello.
+ 

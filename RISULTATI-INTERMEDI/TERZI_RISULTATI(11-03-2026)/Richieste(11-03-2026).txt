@@ -1,0 +1,16 @@
+esercizi corretti -> da analizzare in futuro con LLM, per falsi positivi
+ 
+prompt giudice -> dirgli che diagnosi proviene da altro LLM
+ 
+ 
+prompt -> meglio in inglese (specialmente per modelli piccoli)
+-> si può chiedere a ChatGPT di migliorare i prompt
+ 
+ 
+check dei comandi "ipcs" e "ipcrm" su WSL (lanciare il comando "ipcs" sia su WSL sia su Linux)
+ 
+ 
+nei grafici, mostrare tutte le categorie incluse quelle a 0%
+ 
+ 
+"static" failure -> non trova mai i problemi, si può evitare di dargli l'output (solo il codice sorgente)

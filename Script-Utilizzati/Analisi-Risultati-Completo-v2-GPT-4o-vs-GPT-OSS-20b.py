@@ -1071,113 +1071,35 @@ def print_model_comparison_section(df_gpt4o_all, df_gpt_oss_all):
     print(comparison_table.to_string(index=False))
 
 def compute_metric_for_category(df, failure_cat, metric_type):
-    """
-    Calcola una metrica specifica per una categoria di fallimento.
-    metric_type: "output_eval", "code_eval", "output_diag", "code_diag"
-    """
-    df_cat = df[df["failure_category"] == failure_cat].copy()
-    if df_cat.empty:
-        return {"total_cases": 0, "correct_cases": 0, "accuracy_pct": pd.NA}
-    
-    if failure_cat == "correct":
-        if metric_type == "output_eval":
-            # LLM valuta correttamente se output è CORRETTO
-            subset = df_cat[df_cat["llm_Output_Correct"].notna()].copy()
-            correct_mask = subset["llm_Output_Correct"] == "YES"
-        elif metric_type == "code_eval":
-            # LLM valuta correttamente se codice è CORRETTO
-            subset = df_cat[df_cat["llm_Code_Correct"].notna()].copy()
-            correct_mask = subset["llm_Code_Correct"] == "YES"
-        elif metric_type == "output_diag":
-            # Quando LLM rileva correttamente che output è corretto, diagnosi giusta?
-            subset = df_cat[(df_cat["llm_Output_Correct"] == "YES") & df_cat["judge_Output_Correct"].notna()].copy()
-            correct_mask = subset["judge_Output_Correct"] == "YES"
-        elif metric_type == "code_diag":
-            # Quando LLM rileva correttamente che codice è corretto, diagnosi giusta?
-            subset = df_cat[(df_cat["llm_Code_Correct"] == "YES") & df_cat["judge_Code_Correct"].notna()].copy()
-            correct_mask = subset["judge_Code_Correct"] == "YES"
-    
-    elif failure_cat == "static_failure":
-        if metric_type == "output_eval":
-            # LLM valuta correttamente se output è SCORRETTO
-            subset = df_cat[df_cat["llm_Output_Correct"].notna()].copy()
-            correct_mask = subset["llm_Output_Correct"] == "NO"
-        elif metric_type == "code_eval":
-            # LLM valuta correttamente se codice è SCORRETTO
-            subset = df_cat[df_cat["llm_Code_Correct"].notna()].copy()
-            correct_mask = subset["llm_Code_Correct"] == "NO"
-        elif metric_type == "output_diag":
-            # Quando LLM rileva correttamente che output è CORRETTO, diagnosi giusta?
-            subset = df_cat[(df_cat["llm_Output_Correct"] == "YES") & df_cat["judge_Output_Correct"].notna()].copy()
-            correct_mask = subset["judge_Output_Correct"] == "YES"
-        elif metric_type == "code_diag":
-            # Quando LLM rileva correttamente che codice è scorretto, diagnosi giusta?
-            subset = df_cat[(df_cat["llm_Code_Correct"] == "NO") & df_cat["judge_Code_Correct"].notna()].copy()
-            correct_mask = subset["judge_Code_Correct"] == "YES"
-    
-    elif failure_cat == "dynamic_failure":
-        if metric_type == "output_eval":
-            # LLM valuta correttamente se output è SCORRETTO
-            subset = df_cat[df_cat["llm_Output_Correct"].notna()].copy()
-            correct_mask = subset["llm_Output_Correct"] == "NO"
-        elif metric_type == "code_eval":
-            # LLM valuta correttamente se codice è SCORRETTO
-            subset = df_cat[df_cat["llm_Code_Correct"].notna()].copy()
-            correct_mask = subset["llm_Code_Correct"] == "NO"
-        elif metric_type == "output_diag":
-            # Quando LLM rileva correttamente che output è scorretto, diagnosi giusta?
-            subset = df_cat[(df_cat["llm_Output_Correct"] == "NO") & df_cat["judge_Output_Correct"].notna()].copy()
-            correct_mask = subset["judge_Output_Correct"] == "YES"
-        elif metric_type == "code_diag":
-            # Quando LLM rileva correttamente che codice è scorretto, diagnosi giusta?
-            subset = df_cat[(df_cat["llm_Code_Correct"] == "NO") & df_cat["judge_Code_Correct"].notna()].copy()
-            correct_mask = subset["judge_Code_Correct"] == "YES"
-    
-    elif failure_cat in ["crash", "timeout", "ipc_leak"]:
-        if metric_type == "output_eval":
-            return {"total_cases": 0, "correct_cases": 0, "accuracy_pct": pd.NA}
-        elif metric_type == "code_eval":
-            # LLM valuta correttamente se codice è SCORRETTO
-            subset = df_cat[df_cat["llm_Code_Correct"].notna()].copy()
-            correct_mask = subset["llm_Code_Correct"] == "NO"
-        elif metric_type == "output_diag":
-            return {"total_cases": 0, "correct_cases": 0, "accuracy_pct": pd.NA}
-        elif metric_type == "code_diag":
-            # Quando LLM rileva correttamente che codice è scorretto, diagnosi giusta?
-            subset = df_cat[(df_cat["llm_Code_Correct"] == "NO") & df_cat["judge_Code_Correct"].notna()].copy()
-            correct_mask = subset["judge_Code_Correct"] == "YES"
-    
-    else:
-        return {"total_cases": 0, "correct_cases": 0, "accuracy_pct": pd.NA}
-    
-    if subset.empty:
-        return {"total_cases": 0, "correct_cases": 0, "accuracy_pct": pd.NA}
-    
-    correct_cases = int(correct_mask.sum())
-    total_cases = int(len(subset))
-    return {
-        "total_cases": total_cases,
-        "correct_cases": correct_cases,
-        "accuracy_pct": accuracy_to_pct(correct_cases, total_cases),
-    }
-
-
-def compute_metric_for_category(df, failure_cat, metric_type):
     """Versione coerente con le metriche globali e con il giudizio YES/NO del judge."""
     df_cat = df[df["failure_category"] == failure_cat].copy()
     if df_cat.empty:
         return {"total_cases": 0, "correct_cases": 0, "accuracy_pct": pd.NA}
 
     if metric_type == "output_eval":
-        subset = df_cat[df_cat["llm_Output_Correct_bin"].notna()].copy()
-        if subset.empty:
-            return {"total_cases": 0, "correct_cases": 0, "accuracy_pct": pd.NA}
-        correct_mask = subset["llm_Output_Correct_bin"].astype("Int64") == subset["gt_output_correct_bin"].astype("Int64")
+        if failure_cat == "static_failure":
+            # LLM valuta correttamente se output è CORRETTO
+            subset = df_cat[df_cat["llm_Output_Correct"].notna()].copy()
+            if subset.empty:
+                return {"total_cases": 0, "correct_cases": 0, "accuracy_pct": pd.NA}
+            correct_mask = subset["llm_Output_Correct"] == "YES"
+        else:
+            subset = df_cat[df_cat["llm_Output_Correct_bin"].notna()].copy()
+            if subset.empty:
+                return {"total_cases": 0, "correct_cases": 0, "accuracy_pct": pd.NA}
+            correct_mask = subset["llm_Output_Correct_bin"].astype("Int64") == subset["gt_output_correct_bin"].astype("Int64")
     elif metric_type == "code_eval":
-        subset = df_cat[df_cat["llm_Code_Correct_bin"].notna()].copy()
-        if subset.empty:
-            return {"total_cases": 0, "correct_cases": 0, "accuracy_pct": pd.NA}
-        correct_mask = subset["llm_Code_Correct_bin"].astype("Int64") == subset["gt_code_correct_bin"].astype("Int64")
+        if failure_cat == "static_failure":
+            # LLM valuta correttamente se codice è SCORRETTO
+            subset = df_cat[df_cat["llm_Code_Correct"].notna()].copy()
+            if subset.empty:
+                return {"total_cases": 0, "correct_cases": 0, "accuracy_pct": pd.NA}
+            correct_mask = subset["llm_Code_Correct"] == "NO"
+        else:
+            subset = df_cat[df_cat["llm_Code_Correct_bin"].notna()].copy()
+            if subset.empty:
+                return {"total_cases": 0, "correct_cases": 0, "accuracy_pct": pd.NA}
+            correct_mask = subset["llm_Code_Correct_bin"].astype("Int64") == subset["gt_code_correct_bin"].astype("Int64")
     elif metric_type == "output_diag":
         if failure_cat == "dynamic_failure":
             subset = df_cat[
