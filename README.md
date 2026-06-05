@@ -93,7 +93,7 @@ In aggiunta alle regole Semgrep personalizzate integrate nella pipeline principa
 
 ### Obiettivo
 
-L`analisi confronta i warning prodotti dal ruleset 0xdea sui commit degli studenti con quelli rilevati sulla soluzione di riferimento (ground truth), calcolando un **differenziale positivo** per categoria. Viene inoltre misurata la **sovrapposizione** tra i warning 0xdea e le regole Semgrep custom del progetto, sui commit classificati come `correct` o `static_failure`.
+L'analisi confronta i warning prodotti dal ruleset 0xdea sui commit degli studenti con quelli rilevati sulla soluzione di riferimento (ground truth), calcolando un **differenziale positivo** per categoria. Viene inoltre misurata la **sovrapposizione** tra i warning 0xdea e le regole Semgrep custom del progetto, sui commit classificati come 'correct' o 'static_failure'.
 
 ### Categorie analizzate
 
