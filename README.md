@@ -108,8 +108,8 @@ Script Python che carica i JSON prodotti dalla pipeline LLM e genera tutti i gra
 |---|---|
 | Valutazione Output | Accuratezza del giudizio LLM sull'output rispetto alla ground truth |
 | Valutazione Codice | Accuratezza del giudizio LLM sul codice rispetto alla ground truth |
-| Diagnosi Output | Correttezza della diagnosi output validata dal giudice (su `dynamic_failure`) |
-| Diagnosi Codice | Correttezza della diagnosi codice validata dal giudice (su `dynamic_failure`, `static_failure`, `crash`, `ipc_leak`, `timeout`) |
+| Diagnosi Output | Correttezza della diagnosi output validata dal giudice |
+| Diagnosi Codice | Correttezza della diagnosi codice validata dal giudice |
 
 Produce i PDF in `RISULTATI-ESN/` e i grafici aggregati `Distribuzione_tutte_esercitazioni.pdf` e `Distribuzione_tutte_esercitazioni_LLM.pdf`.
 
