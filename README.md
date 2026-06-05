@@ -12,7 +12,7 @@ Lo sviluppo di programmi concorrenti richiede attenzione a problematiche comples
 - Gestione di risorse IPC (semafori, code di messaggi, memoria condivisa)
 - Ordine e coerenza dei messaggi scambiati
 
-I test dinamici tradizionali non sempre rilevano errori dovuti a interleaving non deterministico o protocolli complessi. L'analisi statica con **Semgrep**, tramite regole personalizzate, consente di individuare errori strutturali nel codice.
+I test dinamici tradizionali non sempre rilevano errori dovuti a interleaving non deterministico o protocolli complessi. L`analisi statica con **Semgrep**, tramite regole personalizzate, consente di individuare errori strutturali nel codice.
 
 ### Pipeline di analisi
 
@@ -46,20 +46,20 @@ La pipeline combinata è composta da:
 - **Dataset:** repository degli studenti per 5 esercitazioni: semafori, monitor, threads, messaggi, server multithread  
 - **Strumenti:** Python, Bash, WSL, Semgrep, Groq, Azure OpenAI GPT-4o, GPT-OSS-20b  
 - **Prompt Engineering:** template per LLM primario e giudice, con regole dettagliate per diagnosi accurate  
-- **Categorie di fallimento:** 'compile failure', 'crash', 'timeout', 'IPC leak', 'dynamic failure', 'static failure', 'correct'  
+- **Categorie di fallimento:** `compile failure`, `crash`, `timeout`, `IPC leak`, `dynamic failure`, `static failure`, `correct`  
 - **Validazione:** LLM giudice verifica coerenza diagnosi con output dei test e codice corretto  
 ---
 
 ## Risultati
 
-- Riconoscimento accurato di fallimenti evidenti: 'crash', 'timeout', 'IPC leak'  
+- Riconoscimento accurato di fallimenti evidenti: `crash`, `timeout`, `IPC leak`  
 - Buona capacità di individuare e descrivere difetti complessi  
 - Limitazioni riscontrate in diagnosi di output con strutture ridotte o protocolli complessi  
 - Risultati raccolti in **JSON** per analisi statistiche e visualizzazioni grafiche  
 
 Esempio struttura JSON per un commit:
 
-'''json
+```json
 {
   "student": "nome_studente",
   "exercise": "nome_esercizio",
@@ -83,17 +83,17 @@ Esempio struttura JSON per un commit:
   "judge_Code_Correct": "YES/NO",
   "judge_Code_Motivation": "motivazione_giudice"
 }
-''''
+````
 
 ---
 
 ## Analisi Statica con Semgrep 0xdea
 
-In aggiunta alle regole Semgrep personalizzate integrate nella pipeline principale, è stata condotta un'analisi supplementare utilizzando il ruleset pubblico **[0xdea/semgrep-rules](https://github.com/0xdea/semgrep-rules)**, una raccolta di regole C/C++ orientate alla sicurezza.
+In aggiunta alle regole Semgrep personalizzate integrate nella pipeline principale, è stata condotta un`analisi supplementare utilizzando il ruleset pubblico **[0xdea/semgrep-rules](https://github.com/0xdea/semgrep-rules)**, una raccolta di regole C/C++ orientate alla sicurezza.
 
 ### Obiettivo
 
-L'analisi confronta i warning prodotti dal ruleset 0xdea sui commit degli studenti con quelli rilevati sulla soluzione di riferimento (ground truth), calcolando un **differenziale positivo** per categoria. Viene inoltre misurata la **sovrapposizione** tra i warning 0xdea e le regole Semgrep custom del progetto, sui commit classificati come 'correct' o 'static_failure'.
+L`analisi confronta i warning prodotti dal ruleset 0xdea sui commit degli studenti con quelli rilevati sulla soluzione di riferimento (ground truth), calcolando un **differenziale positivo** per categoria. Viene inoltre misurata la **sovrapposizione** tra i warning 0xdea e le regole Semgrep custom del progetto, sui commit classificati come `correct` o `static_failure`.
 
 ### Categorie analizzate
 
@@ -101,19 +101,19 @@ Le regole 0xdea sono organizzate in nove categorie:
 
 | Categoria | Descrizione |
 |---|---|
-| 'buffer overflows' | Scritture oltre i limiti del buffer |
-| 'integer overflows' | Overflow aritmetici su interi |
-| 'format strings' | Uso non sicuro di printf/scanf |
-| 'memory management' | Leak, use-after-free, double-free |
-| 'command injection' | Esecuzione di comandi da input non sanificato |
-| 'race conditions' | Accessi concorrenti non protetti |
-| 'privilege management' | Gestione errata dei privilegi di processo |
-| 'denial of service' | Pattern che possono causare blocchi o crash |
-| 'miscellaneous' | Regole non classificate nelle categorie precedenti |
+| `buffer overflows` | Scritture oltre i limiti del buffer |
+| `integer overflows` | Overflow aritmetici su interi |
+| `format strings` | Uso non sicuro di printf/scanf |
+| `memory management` | Leak, use-after-free, double-free |
+| `command injection` | Esecuzione di comandi da input non sanificato |
+| `race conditions` | Accessi concorrenti non protetti |
+| `privilege management` | Gestione errata dei privilegi di processo |
+| `denial of service` | Pattern che possono causare blocchi o crash |
+| `miscellaneous` | Regole non classificate nelle categorie precedenti |
 
-### Struttura della cartella 'ANALISI-STATICA-SEMGREP_0xdea'
+### Struttura della cartella `ANALISI-STATICA-SEMGREP_0xdea`
 
-'''
+```
 ANALISI-STATICA-SEMGREP_0xdea/
 ├── Script/
 │   ├── analisi_statica_tutti_commit.py        # Esegue Semgrep (0xdea e standard) su tutti i commit,
@@ -134,16 +134,16 @@ ANALISI-STATICA-SEMGREP_0xdea/
     ├── grafico_0xdea_commit_oltre_ground_truth_percentuale.pdf            # % sul totale commit
     ├── grafico_0xdea_commit_oltre_ground_truth_percentuale_normalizzata.pdf  # % normalizzata
     └── grafico_overlap_semgrep_vs_custom_correct_static_failure_percentuale.pdf  # Overlap 0xdea vs custom
-'''
+```
 
 ### Flusso di produzione dei risultati
 
-1. 'analisi_statica_tutti_commit.py' — esegue Semgrep con il ruleset 0xdea su ogni commit di ogni esercitazione, producendo un JSON per esercitazione ('risultati_esN_static_semgrep_0xdea.json').
-2. 'analisi_0xdea_vs_ground_truth.py' — carica quei JSON e la ground truth, sottrae i warning della soluzione di riferimento da quelli dello studente (mantenendo solo i diff positivi), aggrega per categoria, e scrive:
-   - i file JSON di dettaglio per commit ('risultati_esN_0xdea_ground_truth_diff.json');
-   - i CSV di riepilogo (assoluti, percentuali, normalizzati, con e senza 'miscellaneous');
+1. `analisi_statica_tutti_commit.py` — esegue Semgrep con il ruleset 0xdea su ogni commit di ogni esercitazione, producendo un JSON per esercitazione (`risultati_esN_static_semgrep_0xdea.json`).
+2. `analisi_0xdea_vs_ground_truth.py` — carica quei JSON e la ground truth, sottrae i warning della soluzione di riferimento da quelli dello studente (mantenendo solo i diff positivi), aggrega per categoria, e scrive:
+   - i file JSON di dettaglio per commit (`risultati_esN_0xdea_ground_truth_diff.json`);
+   - i CSV di riepilogo (assoluti, percentuali, normalizzati, con e senza `miscellaneous`);
    - il CSV di sovrapposizione con le regole custom;
-   - i quattro grafici PDF nella cartella 'Grafici/'.
+   - i quattro grafici PDF nella cartella `Grafici/`.
 
 ---
 
