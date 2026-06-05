@@ -113,28 +113,55 @@ Le regole 0xdea sono organizzate in nove categorie:
 
 ### Struttura della cartella `ANALISI-STATICA-SEMGREP_0xdea`
 
-```
+```text
 ANALISI-STATICA-SEMGREP_0xdea/
 ├── Script/
-│   ├── analisi_statica_tutti_commit.py        # Esegue Semgrep (0xdea e standard) su tutti i commit,
-│   │                                          # producendo i JSON risultati_esN_static_semgrep_0xdea.json
-│   └── analisi_0xdea_vs_ground_truth.py       # Calcola il diff rispetto alla ground truth
-│                                              # e genera CSV e grafici finali
+│   ├── analisi_statica_tutti_commit.py
+│   └── analisi_0xdea_vs_ground_truth.py
+│
 ├── Risultati/
-│   ├── risultati_esN_0xdea_ground_truth_diff.json   # (N=1..5) Diff per-commit: conteggi regola e
-│   │                                                # categoria, categorie con diff > 0
-│   ├── riepilogo_commit_con_diff_positivo_per_categoria.csv             # Conteggi assoluti per esercitazione
-│   ├── riepilogo_commit_con_diff_positivo_per_categoria_percentuale.csv # % sul totale commit analizzati
-│   ├── riepilogo_commit_con_diff_positivo_per_categoria_percentuale_normalizzata.csv  # % normalizzata
-│   │                                                                                  # sulle occorrenze totali
-│   ├── riepilogo_overlap_semgrep_vs_custom_correct_static_failure.csv  # Sovrapposizione 0xdea vs custom
-│   └── meta_analisi_0xdea_ground_truth.json   # Metadati: path regole, output, categorie
+│   ├── risultati_esN_0xdea_ground_truth_diff.json
+│   ├── riepilogo_commit_con_diff_positivo_per_categoria.csv
+│   ├── riepilogo_commit_con_diff_positivo_per_categoria_percentuale.csv
+│   ├── riepilogo_commit_con_diff_positivo_per_categoria_percentuale_normalizzata.csv
+│   ├── riepilogo_overlap_semgrep_vs_custom_correct_static_failure.csv
+│   └── meta_analisi_0xdea_ground_truth.json
+│
 └── Grafici/
-    ├── grafico_0xdea_commit_oltre_ground_truth.pdf                        # Conteggi assoluti per categoria
-    ├── grafico_0xdea_commit_oltre_ground_truth_percentuale.pdf            # % sul totale commit
-    ├── grafico_0xdea_commit_oltre_ground_truth_percentuale_normalizzata.pdf  # % normalizzata
-    └── grafico_overlap_semgrep_vs_custom_correct_static_failure_percentuale.pdf  # Overlap 0xdea vs custom
+    ├── grafico_0xdea_commit_oltre_ground_truth.pdf
+    ├── grafico_0xdea_commit_oltre_ground_truth_percentuale.pdf
+    ├── grafico_0xdea_commit_oltre_ground_truth_percentuale_normalizzata.pdf
+    └── grafico_overlap_semgrep_vs_custom_correct_static_failure_percentuale.pdf
 ```
+
+### Descrizione dei contenuti
+
+#### Script
+
+| File | Descrizione |
+|--------|------------|
+| `analisi_statica_tutti_commit.py` | Esegue Semgrep (ruleset 0xdea e regole standard) su tutti i commit e genera i file `risultati_esN_static_semgrep_0xdea.json`. |
+| `analisi_0xdea_vs_ground_truth.py` | Confronta i warning con la ground truth, calcola i differenziali positivi e genera CSV e grafici finali. |
+
+#### Risultati
+
+| File | Descrizione |
+|--------|------------|
+| `risultati_esN_0xdea_ground_truth_diff.json` | Differenziali per commit rispetto alla ground truth, aggregati per regola e categoria. |
+| `riepilogo_commit_con_diff_positivo_per_categoria.csv` | Conteggi assoluti per categoria ed esercitazione. |
+| `riepilogo_commit_con_diff_positivo_per_categoria_percentuale.csv` | Percentuali sul totale dei commit analizzati. |
+| `riepilogo_commit_con_diff_positivo_per_categoria_percentuale_normalizzata.csv` | Percentuali normalizzate rispetto alle occorrenze totali. |
+| `riepilogo_overlap_semgrep_vs_custom_correct_static_failure.csv` | Sovrapposizione tra warning 0xdea e regole Semgrep custom. |
+| `meta_analisi_0xdea_ground_truth.json` | Metadati relativi a regole, categorie e percorsi utilizzati nell'analisi. |
+
+#### Grafici
+
+| File | Descrizione |
+|--------|------------|
+| `grafico_0xdea_commit_oltre_ground_truth.pdf` | Conteggi assoluti dei commit con warning oltre la ground truth. |
+| `grafico_0xdea_commit_oltre_ground_truth_percentuale.pdf` | Percentuali sul totale dei commit analizzati. |
+| `grafico_0xdea_commit_oltre_ground_truth_percentuale_normalizzata.pdf` | Percentuali normalizzate per categoria. |
+| `grafico_overlap_semgrep_vs_custom_correct_static_failure_percentuale.pdf` | Percentuale di sovrapposizione tra warning 0xdea e regole custom. |
 
 ### Flusso di produzione dei risultati
 
