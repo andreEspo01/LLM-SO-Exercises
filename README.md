@@ -174,6 +174,122 @@ ANALISI-STATICA-SEMGREP_0xdea/
 
 ---
 
+---
+
+## Script Principali
+
+Gli script risiedono nella cartella `Script-Utilizzati/`.
+
+### Script Bash — `Script-Bash-Only-Test-EsN.sh` (N = 1…5)
+
+Uno script per esercitazione. Itera su tutti i commit di tutti gli studenti, esegue compilazione, test dinamici e analisi statica Semgrep con le regole custom, e produce il file `risultati_esN_tutti_commit_bash.json`.
+
+| Flag | Descrizione |
+|---|---|
+| _(nessun flag)_ | Modalità batch: analizza tutti gli studenti e tutti i commit |
+| `--single-student-commit --student-dir <dir> --commit <hash>` | Analisi di un singolo commit |
+| `--output-file <file>` | Percorso alternativo per il file JSON di output |
+| `--quiet` | Sopprime l'output di log intermedio |
+
+Output prodotto per ogni commit: `compile_success`, `test_success`, `stdout`, `stderr`, `program_output`, `static_warnings`, `failure_category`.
+
+---
+
+### Script LLM — `Script-LLM-Esperimento1.0.py`
+
+Script di prima generazione per la pipeline LLM, usato per le esercitazioni 1–4. Supporta provider **Groq** (multi-chiave con rotazione automatica) e **Azure OpenAI**. Legge il file `risultati_esN_tutti_commit_bash.json`, seleziona i commit da analizzare, li sottopone ai prompt LLM e salva i risultati arricchiti in `risultati_esN.json`.
+
+Variabili d'ambiente:
+
+```bash
+export LLM_PROVIDER=groq          # o "azure"
+export GROQ_API_KEYS="key1,key2"  # rotazione automatica in caso di rate limit
+export AZURE_OPENAI_ENDPOINT="https://..."
+export AZURE_OPENAI_API_KEY="..."
+export AZURE_OPENAI_MODEL_DEPLOYMENT="gpt-4o"
+```
+
+---
+
+### Script LLM con VPN — `Script-LLM-Esperimento1.0-v2-with_VPN.py`
+
+Versione estesa usata per l'esercitazione 5, con supporto aggiuntivo per un modello remoto (`gpt-oss-20b`) accessibile tramite VPN (FortiClient). Aggiunge:
+
+- Provider `remote-gpt`: client OpenAI-compatibile puntato su endpoint privato via VPN
+- Parallelizzazione delle richieste con semafori separati per modello primario e giudice (`REMOTE_GPT_PRIMARY_PARALLEL_REQUESTS`, `REMOTE_GPT_JUDGE_PARALLEL_REQUESTS`)
+- Tracciamento dei token e calcolo del costo per ogni chiamata
+
+```bash
+export LLM_PROVIDER=remote-gpt
+export REMOTE_GPT_ENDPOINT="http://192.168.100.7:8888"
+export REMOTE_GPT_MODEL="gpt-oss-20b"
+```
+
+---
+
+### Script di analisi risultati — `Analisi-Risultati-Completo.py`
+
+Script Python che carica i JSON prodotti dalla pipeline LLM e genera tutti i grafici e le tabelle di valutazione. Calcola le quattro metriche principali per categoria di fallimento ed esercitazione:
+
+| Metrica | Descrizione |
+|---|---|
+| Valutazione Output | Accuratezza del giudizio LLM sull'output rispetto alla ground truth |
+| Valutazione Codice | Accuratezza del giudizio LLM sul codice rispetto alla ground truth |
+| Diagnosi Output | Correttezza della diagnosi output validata dal giudice (su `dynamic_failure`) |
+| Diagnosi Codice | Correttezza della diagnosi codice validata dal giudice (su `dynamic_failure`, `static_failure`, `crash`, `ipc_leak`, `timeout`) |
+
+Produce i PDF in `RISULTATI-ESN/` e i grafici aggregati `Distribuzione_tutte_esercitazioni.pdf` e `Distribuzione_tutte_esercitazioni_LLM.pdf`.
+
+---
+
+### Script di confronto modelli — `Analisi-Risultati-Completo-v2-GPT-4o-vs-GPT-OSS-20b.py`
+
+Versione estesa del precedente. Carica in parallelo i risultati di GPT-4o (`risultati_esN.json`) e GPT-OSS-20b (`risultati_esN_gpt-oss.json`) e produce grafici comparativi side-by-side:
+
+- `Confronto_gpt-4o_vs_gpt-oss_metriche_globali.pdf`
+- `Confronto_gpt-4o_vs_gpt-oss_metriche_per_esercitazione.pdf`
+- `Confronto_gpt-4o_vs_gpt-oss_metriche_per_categoria.pdf`
+
+---
+
+## Struttura dei File di Risultato
+
+### `Risultati-Finali-JSON/risultati_esN.json`
+
+Ogni file contiene una lista di oggetti JSON, uno per commit analizzato dal modello LLM.
+
+**Campi principali per record:**
+
+| Campo | Tipo | Descrizione |
+|---|---|---|
+| `student` | string | Identificativo dello studente |
+| `exercise` | string | Nome dell'esercizio analizzato |
+| `commit_analyzed` | string | Hash SHA del commit |
+| `failure_category` | string | Categoria assegnata: `compile_failure`, `crash`, `timeout`, `ipc_leak`, `dynamic_failure`, `static_failure`, `correct` |
+| `primary_model` | string | Modello LLM usato per la diagnosi primaria |
+| `judge_model` | string | Modello LLM usato come giudice |
+| `compile_success` | bool | Esito della compilazione |
+| `test_success` | bool | Esito dell'esecuzione dei test |
+| `stdout` | string | Output sintetico del test runner (`pass`/`fail`) |
+| `stderr` | string | Messaggi di errore del compilatore o del runtime |
+| `test_feedback` | string | Feedback testuale normalizzato prodotto dalla pipeline di test |
+| `program_output` | string | Output visibile del programma durante i test |
+| `static_warnings` | array | Warning Semgrep custom con `file`, `line`, `message` |
+| `llm_Output_Correct` | string | Giudizio del modello primario sull'output (`YES`/`NO`) |
+| `llm_Output_Diagnosis` | string | Diagnosi testuale dell'output (max 100 parole, in inglese) |
+| `llm_Code_Correct` | string | Giudizio del modello primario sul codice (`YES`/`NO`) |
+| `llm_Code_Diagnosis` | string | Diagnosi testuale del codice (max 100 parole, in inglese) |
+| `judge_Output_Correct` | string | Verifica del giudice sulla diagnosi output (`YES`/`NO`) |
+| `judge_Output_Motivation` | string | Motivazione del giudice per la diagnosi output |
+| `judge_Code_Correct` | string | Verifica del giudice sulla diagnosi codice (`YES`/`NO`) |
+| `judge_Code_Motivation` | string | Motivazione del giudice per la diagnosi codice |
+
+### `Risultati-Finali-JSON/risultati_esN_tutti_commit_bash.json`
+
+Risultati grezzi dell'intera storia dei commit per ogni studente (non solo l'ultimo), prodotti dalla pipeline Bash prima dell'analisi LLM. Contengono gli stessi campi tecnici (`compile_success`, `test_success`, `stdout`, `stderr`, `program_output`, `static_warnings`, `failure_category`) ma senza le diagnosi LLM.
+
+---
+
 ## Conclusione
 
 L’integrazione tra test dinamici, analisi statica e LLM:
